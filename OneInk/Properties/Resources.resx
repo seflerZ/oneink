@@ -59,13 +59,21 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="ribbon" type="System.String">
-    <value>&lt;customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" loadImage="GetImage"&gt;
+    <value>&lt;customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" loadImage="GetImage" onLoad="OnRibbonLoad"&gt;
     &lt;ribbon&gt;
         &lt;tabs&gt;
             &lt;tab id="tabOneInk" getLabel="GetLabel"&gt;
                 &lt;group id="groupInkTools" getLabel="GetLabel"&gt;
                     &lt;button id="buttonClearInk" getLabel="GetLabel" size="large" getScreentip="GetScreentip" onAction="ClearInkButtonClicked" image="ClearAll.png"/&gt;
                     &lt;button id="buttonDeleteByColor" getLabel="GetLabel" size="large" getScreentip="GetScreentip" onAction="SelectInkColorButtonClicked" image="DeleteByColor.png"/&gt;
+                    &lt;splitButton id="splitToDashed" size="large"&gt;
+                        &lt;button id="buttonToDashed" getLabel="GetLabel" getScreentip="GetScreentip" onAction="ToDashedInkButtonClicked" getImage="GetToDashedImage"/&gt;
+                        &lt;menu&gt;
+                            &lt;button id="menuItemDense" label="密集" onAction="OnMenuDenseClicked" image="ToDashedDense.png"/&gt;
+                            &lt;button id="menuItemMedium" label="中等" onAction="OnMenuMediumClicked" image="ToDashedMedium.png"/&gt;
+                            &lt;button id="menuItemSparse" label="稀疏" onAction="OnMenuSparseClicked" image="ToDashedSparse.png"/&gt;
+                        &lt;/menu&gt;
+                    &lt;/splitButton&gt;
                 &lt;/group&gt;
             &lt;/tab&gt;
         &lt;/tabs&gt;

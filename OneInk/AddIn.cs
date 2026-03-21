@@ -34,7 +34,7 @@ namespace OneInk
     public class AddIn : IDTExtensibility2, IRibbonExtensibility
     {
         private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "OneInk.log");
-        
+
         private static void Log(string message)
         {
             try
@@ -51,6 +51,9 @@ namespace OneInk
         /// Reference to the OneNote application object.
         /// </summary>
         protected Application OneNoteApplication { get; set; }
+
+        private static IRibbonUI _ribbon;
+        private static int _selectedDensityIndex = 1; // default to medium
 
         public AddIn()
         {
@@ -73,6 +76,15 @@ namespace OneInk
                 Log($"GetCustomUI ERROR: {ex}");
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Called by OneNote when the ribbon is loaded. Stores reference to ribbon UI.
+        /// </summary>
+        public void OnRibbonLoad(IRibbonUI ribbon)
+        {
+            _ribbon = ribbon;
+            Log("Ribbon loaded");
         }
 
         public void OnAddInsUpdate(ref Array custom)
@@ -210,6 +222,115 @@ namespace OneInk
             catch (Exception ex)
             {
                 MessageBox.Show(string.Format(Strings.ErrorClear, ex.Message));
+            }
+        }
+
+        /// <summary>
+        /// Button click handler for converting selected ink to dashed/dotted lines.
+        /// Breaks each stroke into segments with gaps at regular intervals.
+        /// If the user has ink selected, only selected ink is converted.
+        /// </summary>
+        /// <param name="control">The ribbon control that triggered the action.</param>
+        public void ToDashedInkButtonClicked(IRibbonControl control)
+        {
+            ExecuteToDashed();
+        }
+
+        private void ExecuteToDashed()
+        {
+            try
+            {
+                if (OneNoteApplication == null)
+                {
+                    MessageBox.Show(Strings.AppNotAvailable);
+                    return;
+                }
+
+                string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
+
+                // Get spacing from ribbon dropdown selection
+                float dashFraction;
+                switch (_selectedDensityIndex)
+                {
+                    case 0: dashFraction = 0.025f; break;
+                    case 2: dashFraction = 0.10f; break;
+                    default: dashFraction = 0.05f; break;
+                }
+
+                // Step 1: Get selection metadata
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryDataSelection);
+
+                var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument docSel;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
+                    docSel = XDocument.Load(reader);
+                XNamespace nsSel = docSel.Root.Name.Namespace;
+
+                var selInkElements = docSel.Descendants(nsSel + "InkDrawing").ToList();
+                var selectedObjectIds = new HashSet<string>(
+                    selInkElements.Where(e => e.Attribute("selected")?.Value == "all")
+                                  .Select(e => e.Attribute("objectID")?.Value ?? "")
+                                  .Where(id => !string.IsNullOrEmpty(id))
+                );
+                bool hasSelection = selectedObjectIds.Count > 0;
+
+                // Step 2: Get full page with ISF data
+                OneNoteApplication.GetPageContent(pageId, out string xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
+
+                if (string.IsNullOrEmpty(xml))
+                {
+                    MessageBox.Show(Strings.RetrieveFailed);
+                    return;
+                }
+
+                var settings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument doc;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xml), settings))
+                    doc = XDocument.Load(reader);
+                XNamespace ns = doc.Root.Name.Namespace;
+
+                var inkElements = doc.Descendants(ns + "InkDrawing").ToList();
+
+                if (inkElements.Count == 0)
+                {
+                    MessageBox.Show(hasSelection ? Strings.NoInkStrokesInSelection : Strings.NoInkStrokes);
+                    return;
+                }
+
+                int convertedCount = 0;
+
+                foreach (var ink in inkElements)
+                {
+                    string objectId = ink.Attribute("objectID")?.Value ?? "";
+                    if (hasSelection && !selectedObjectIds.Contains(objectId))
+                        continue;
+
+                    var dataEl = ink.Element(ns + "Data");
+                    string isfBase64 = dataEl?.Value.Trim();
+                    if (string.IsNullOrEmpty(isfBase64))
+                        continue;
+
+                    string dashedBase64 = InkDashedConverter.ConvertToDashed(isfBase64, dashFraction, dashFraction);
+                    if (!string.IsNullOrEmpty(dashedBase64))
+                    {
+                        dataEl.Value = dashedBase64;
+                        convertedCount++;
+                    }
+                }
+
+                if (convertedCount == 0)
+                {
+                    MessageBox.Show(hasSelection ? Strings.NoInkStrokesInSelection : Strings.NoInkStrokes);
+                    return;
+                }
+
+                // Step 3: Update the page with modified XML
+                OneNoteApplication.UpdatePageContent(doc.ToString());
+            }
+            catch (Exception ex)
+            {
+                Log($"ToDashedInkButtonClicked ERROR: {ex}");
+                MessageBox.Show(string.Format(Strings.ErrorDashed, ex.Message));
             }
         }
 
@@ -399,6 +520,7 @@ namespace OneInk
                     case "groupInkTools": label = Strings.RibbonGroupLabel; break;
                     case "buttonClearInk": label = Strings.ButtonClearInkLabel; break;
                     case "buttonDeleteByColor": label = Strings.ButtonDeleteByColorLabel; break;
+                    case "buttonToDashed": label = GetCurrentDashedLabel(); break;
                     default: label = null; break;
                 }
                 return label;
@@ -422,6 +544,7 @@ namespace OneInk
                 {
                     case "buttonClearInk": tip = Strings.ButtonClearInkScreentip; break;
                     case "buttonDeleteByColor": tip = Strings.ButtonDeleteByColorScreentip; break;
+                    case "buttonToDashed": tip = Strings.ButtonToDashedScreentip; break;
                     default: tip = null; break;
                 }
                 return tip;
@@ -431,6 +554,66 @@ namespace OneInk
                 Log($"GetScreentip({control.Id}) ERROR: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Called when Dense menu item is clicked.
+        /// </summary>
+        public void OnMenuDenseClicked(IRibbonControl control)
+        {
+            _selectedDensityIndex = 0;
+            Log($"OnMenuDenseClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonToDashed");
+        }
+
+        /// <summary>
+        /// Called when Medium menu item is clicked.
+        /// </summary>
+        public void OnMenuMediumClicked(IRibbonControl control)
+        {
+            _selectedDensityIndex = 1;
+            Log($"OnMenuMediumClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonToDashed");
+        }
+
+        /// <summary>
+        /// Called when Sparse menu item is clicked.
+        /// </summary>
+        public void OnMenuSparseClicked(IRibbonControl control)
+        {
+            _selectedDensityIndex = 2;
+            Log($"OnMenuSparseClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonToDashed");
+        }
+
+        private static string GetCurrentDashedLabel()
+        {
+            string densityName;
+            switch (_selectedDensityIndex)
+            {
+                case 0: densityName = Strings.DashedDense; break;
+                case 2: densityName = Strings.DashedSparse; break;
+                default: densityName = Strings.DashedMedium; break;
+            }
+            return $"{Strings.ButtonToDashedLabel}（{densityName}）";
+        }
+
+        /// <summary>
+        /// Returns the appropriate image for the ToDashed button based on selected density.
+        /// </summary>
+        public IStream GetToDashedImage(IRibbonControl control)
+        {
+            string densityImage;
+            switch (_selectedDensityIndex)
+            {
+                case 0: densityImage = "ToDashedDense.png"; break;
+                case 2: densityImage = "ToDashedSparse.png"; break;
+                default: densityImage = "ToDashedMedium.png"; break;
+            }
+            return GetImage(densityImage);
         }
 
         /// <summary>

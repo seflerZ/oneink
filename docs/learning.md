@@ -152,3 +152,82 @@ public IPictureDisp GetImage(string imageName) { ... }
 - `deploy.ps1 -Mode Dev` → 从 Release 目录注册（`bin\x64\Release`）
 
 Dev 模式开发建议始终使用 **Release 配置**（与生产环境一致）。
+
+## 7. ISF（Ink Serialized Format）与 Microsoft.Ink
+
+OneNote 的墨迹数据以 ISF 格式存储，可以通过 `Microsoft.Office.Interop.OneNote.GetPageContent` 获取（`PageInfo.piBinaryData`）。
+
+### ISF 前缀
+
+OneNote 返回的 ISF 数据以 `0x00` 开头，后跟数据长度。`Microsoft.Ink.Ink.Load()` **能自动处理**这个前缀，不需要手动剥离。
+
+### ISF 压缩
+
+OneNote 对墨迹点进行了压缩：
+- 一条直线上百个像素的线段可能只存储 2 个控制点
+- 使用 `GetPoints()` 获取的是压缩后的原始点
+- 使用 `GetFlattenedBezierPoints()` 获取沿贝塞尔曲线采样的密集点
+- 转换虚线时必须先用 `GetFlattenedBezierPoints()` 重采样，再用 `ResampleStroke` 插值到足够多的点（200个），否则 dash 区间划分会不均匀
+
+### ISF ZLIB 压缩
+
+部分 OneNote ISF 数据经过 ZLIB 压缩（可通过第二个字节判断是否为 `0x01`）。压缩数据特征：
+- 第一个字节 `0x00`（前缀）
+- 第二个字节不是 `0x01`
+
+```csharp
+if (isfData[0] == 0x00 && isfData.Length > 4 && isfData[1] != 0x01)
+{
+    // 尝试 ZLIB 解压
+    data = DecompressZlib(isfData);
+}
+```
+
+### FitToCurve 属性
+
+`DrawingAttributes.FitToCurve` 决定墨迹渲染为折线（`false`）还是贝塞尔曲线（`true`）。在 `CreateStroke(Point[])` 创建新 stroke 后设置 `FitToCurve=true`，可以让 OneNote 以贝塞尔模式渲染。
+
+```csharp
+var s = ink.CreateStroke(seg);
+s.DrawingAttributes = sg.Attr;
+s.DrawingAttributes.FitToCurve = true;
+```
+
+## 8. 墨迹转虚线核心算法
+
+将墨迹转换为虚线的步骤：
+
+1. **加载 ISF**：`Ink.Load()` → 获取 `Stroke` 集合
+2. **提取几何**：对每个 stroke 调用 `GetFlattenedBezierPoints()` 获取密集采样点
+3. **均匀重采样**：沿路径在固定步长上插值生成 N 个点（如 200 个）
+4. **划分 dash/gap**：沿累计路径长度交替划分实线段和间隔
+5. **创建新 stroke**：每个实线段用 `ink.CreateStroke(Point[])` 创建，继承原始 DrawingAttributes，设置 `FitToCurve=true`
+6. **保存 ISF**：`Ink.Save()` 自动包含 `0x00` 前缀，直接写回 OneNote
+
+### ResampleStroke 优化
+
+原始实现内层循环 O(n×m)，优化后 O(n+m)：
+
+```csharp
+// 预计算累计长度
+double[] cumLen = new double[pts.Length];
+double totalLen = 0;
+for (int i = 1; i < pts.Length; i++)
+{
+    totalLen += Distance(pts[i], pts[i-1]);
+    cumLen[i] = totalLen;
+}
+
+// O(n) 重采样，用移动指针定位目标区间
+int ptr = 0;
+for (int i = 1; i < numPoints - 1; i++)
+{
+    double targetDist = (totalLen * i) / (numPoints - 1);
+    while (ptr < pts.Length - 1 && cumLen[ptr + 1] <= targetDist)
+        ptr++;
+    // 线性插值
+    double t = (targetDist - cumLen[ptr]) / (cumLen[ptr + 1] - cumLen[ptr]);
+    result.Add(Interpolate(pts[ptr], pts[ptr + 1], t));
+}
+```
+

@@ -6,6 +6,7 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 
 - **Clear All Ink**: Remove ink strokes from the current page — if ink is selected (lasso), only selected ink is removed
 - **Delete Ink by Color**: Select a color and delete strokes of that color — if ink is selected (lasso), only selected ink colors are shown and deleted
+- **To Dashed Lines**: Convert ink strokes to dashed/dotted lines — supports three density presets (dense, medium, sparse); if ink is selected (lasso), only selected ink is converted
 
 ## Requirements
 
@@ -59,10 +60,16 @@ All paths are centralized in `config.ps1`. Edit this file if MSBuild or other to
 
 ## Usage
 
-After installation, open OneNote. A **OneInk** tab appears in the ribbon with two buttons:
+After installation, open OneNote. A **OneInk** tab appears in the ribbon with three buttons:
 
 - **Clear All Ink**: Removes ink strokes from the current page — if ink is selected (lasso selection), only selected ink is removed
 - **Delete by Color**: Opens a dialog listing detected ink colors on the page — if ink is selected (lasso selection), only selected ink colors are shown; select a color to delete matching strokes
+- **To Dashed Lines** (split button):
+  - Main button label shows current density (e.g., `转为虚线（中等）`)
+  - Click the dropdown arrow to select density: **密集** (dense), **中等** (medium), **稀疏** (sparse)
+  - Each density has its own icon; clicking a menu item updates the button label and icon
+  - Click the main button to convert ink with the selected density
+  - If ink is selected (lasso selection), only selected ink is converted
 
 ## Project Structure
 
@@ -75,16 +82,18 @@ OneInk/
 │   ├── ReadOnlyStream.cs   # IStream COM wrapper
 │   ├── ColorSelectionDialog.cs # Ink color selection dialog
 │   ├── InkColorExtractor.cs  # ISF color extraction via Microsoft.Ink
+│   ├── InkDashedConverter.cs # Ink-to-dashed conversion via Microsoft.Ink
 │   ├── Strings.cs           # i18n (Chinese/English)
 │   ├── Resources/           # Ribbon icons
 │   └── Properties/
-│       └── Resources.resx   # Ribbon XML + strings
+│       └── Resources.resx   # Ribbon XML + embedded strings
 ├── config.ps1               # Centralized configuration
 ├── build.ps1               # Build script
 ├── deploy.ps1             # Deployment script (Dev + Production modes)
 ├── uninstall.ps1           # Production uninstall script
-├── docs/                    # Development notes and learnings
-│   └── learning.md
+├── docs/                  # Development notes and learnings
+│   ├── learning.md
+│   └── ribbon-learning.md
 └── Setup/                  # Installer project
     └── Setup.vdproj
 ```
@@ -92,10 +101,13 @@ OneInk/
 ## Development Notes
 
 - Ribbon icons are loaded via the `loadImage` callback, returning `IStream` (PNG data)
+- Dynamic ribbon images (e.g., density-dependent icons) use `getImage` callback with `IPictureDisp` return type
 - The add-in uses the OneNote Interop API (`Microsoft.Office.Interop.OneNote`)
 - Ribbon UI is defined in `ribbon.xml` and loaded via `IRibbonExtensibility`
-- Ink operations work with OneNote's XML page format
 - Selection detection: `piBinaryDataSelection` returns `selected="all"` on selected `InkDrawing` elements; `piBinaryData` provides ISF stroke data — use both via objectID matching
+- Ink operations work with OneNote's XML page format and ISF (Ink Serialized Format) via `Microsoft.Ink`
+- `splitButton` is used for combined button + menu UI; menu items use `onAction` callbacks
+- Ribbon `dropDown` `onAction` is known to not fire reliably in OneNote — use separate `button` elements or `splitButton` with `menu` instead
 
 ## License
 
