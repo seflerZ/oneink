@@ -1,0 +1,19 @@
+# Build output
+**/bin/
+**/obj/
+
+# VS
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs
+*.log
+
+# Temp
+*.tmp
+UpgradeLog.htm
+
+.claude
