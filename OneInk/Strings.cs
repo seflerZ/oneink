@@ -30,5 +30,13 @@ namespace OneInk
         internal static string NoInkStrokes => IsChinese ? "当前页面没有墨迹。" : "No ink strokes found on the current page.";
         internal static string ErrorClear => IsChinese ? "清除墨迹时出错：{0}" : "Error clearing ink: {0}";
         internal static string ErrorDelete => IsChinese ? "按颜色删除墨迹时出错：{0}" : "Error deleting ink by color: {0}";
+
+        // Ribbon
+        internal static string RibbonTabLabel => IsChinese ? "OneInk" : "OneInk";
+        internal static string RibbonGroupLabel => IsChinese ? "墨迹工具" : "Ink Tools";
+        internal static string ButtonClearInkLabel => IsChinese ? "清除全部墨迹" : "Clear All Ink";
+        internal static string ButtonDeleteByColorLabel => IsChinese ? "按颜色删除" : "Delete by Color";
+        internal static string ButtonClearInkScreentip => IsChinese ? "删除当前页面的所有墨迹" : "Remove all ink strokes from current page";
+        internal static string ButtonDeleteByColorScreentip => IsChinese ? "按所选颜色删除墨迹" : "Delete ink strokes by selected color";
     }
 }

@@ -18,60 +18,49 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 ## Building
 
 ```powershell
-# x64 (Release)
-.\build-x64.ps1
-
-# x64 (Debug)
-.\build-x64.ps1 Debug
-
-# ARM64
-.\build-arm64.ps1
+.\build.ps1 -Platform x64 -Configuration Release
 ```
 
-Output: `OneInk\bin\x64\Release\` (default) or `OneInk\bin\x64\Debug\`
+Output: `OneInk\bin\x64\Release\`
 
-## Deployment Scripts
+## Deployment
 
-| Script | Description |
-|--------|-------------|
-| `deploy-x64.ps1` | Build Release + copy to Program Files + register (x64) |
-| `deploy-arm64.ps1` | Build Release + copy to Program Files + register (ARM64) |
-| `install.ps1 x64` | Copy pre-built Release output to Program Files + register |
-| `install.ps1 arm64` | Copy pre-built Release output to Program Files + register |
-| `uninstall.ps1 x64` | Unregister COM and remove install directory |
+### Development Mode (recommended for active development)
 
-> Note: Deploy scripts require administrator privileges (UAC prompt will appear).
-
-### Workflow
-
-1. **Develop**: Modify code → `.\build-x64.ps1` (compiles Release to `OneInk\bin\x64\Release\`)
-2. **Deploy**: `.\deploy-x64.ps1` (full build + install + register, requires admin)
-
-Or for already-built output:
 ```powershell
-# After building with build-x64.ps1
-.\install.ps1 x64
+.\deploy.ps1 -Mode Dev -Platform x64
 ```
 
-### Configuration
+- Registers the add-in from the build output directory (`OneInk\bin\x64\Release\`)
+- No admin required
+- After code changes: rebuild, then re-run this script, then restart OneNote
 
-All paths are centralized in `config.ps1`. Edit this file if MSBuild or other tool paths change.
+### Production Mode (for end-user installation)
+
+```powershell
+.\deploy.ps1 -Mode Production -Platform x64
+```
+
+- Builds Release, copies to `C:\Program Files\OneInk-x64`
+- Registers COM AddIn (requires administrator privileges)
+- Sets HKLM registry entries + HKCU LoadBehavior
 
 ## Uninstallation
 
 ```powershell
-.\uninstall.ps1 x64
+.\uninstall.ps1 -Platform x64
 ```
 
-Or manually:
-```
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regasm.exe /u "C:\Program Files\OneInk-x64\OneInk.dll"
-Remove-Item "C:\Program Files\OneInk-x64" -Recurse
-```
+> Note: Only for production installations. Dev mode registration is cleaned up automatically by the system when the build directory changes.
+
+## Configuration
+
+All paths are centralized in `config.ps1`. Edit this file if MSBuild or other tool paths change.
 
 ## Usage
 
 After installation, open OneNote. A **OneInk** tab appears in the ribbon with two buttons:
+
 - **Clear All Ink**: Removes all ink strokes from the current page
 - **Delete by Color**: Opens a dialog listing detected ink colors; select one to delete all strokes of that color
 
@@ -82,25 +71,26 @@ OneInk/
 ├── OneInk.sln              # Visual Studio solution
 ├── OneInk/                 # Main AddIn project
 │   ├── AddIn.cs            # COM AddIn entry point + ribbon callbacks
-│   ├── CCOMStreamWrapper.cs # IStream wrapper for COM
+│   ├── BitmapExtensions.cs # Bitmap → IStream extension
+│   ├── ReadOnlyStream.cs   # IStream COM wrapper
 │   ├── ColorSelectionDialog.cs # Ink color selection dialog
 │   ├── InkColorExtractor.cs  # ISF color extraction via Microsoft.Ink
 │   ├── Strings.cs           # i18n (Chinese/English)
-│   ├── ribbon.xml          # Ribbon UI definition
+│   ├── Resources/           # Ribbon icons
 │   └── Properties/
+│       └── Resources.resx   # Ribbon XML + strings
 ├── config.ps1               # Centralized configuration
-├── build-x64.ps1           # Build script (x64)
-├── build-arm64.ps1         # Build script (ARM64)
-├── deploy-x64.ps1          # Deploy script (x64)
-├── deploy-arm64.ps1        # Deploy script (ARM64)
-├── install.ps1             # Install from pre-built output
+├── build.ps1               # Build script
+├── deploy.ps1             # Deployment script (Dev + Production modes)
+├── uninstall.ps1           # Production uninstall script
 └── Setup/                  # Installer project
     └── Setup.vdproj
 ```
 
 ## Development Notes
 
-- The AddIn uses the OneNote Interop API (`Microsoft.Office.Interop.OneNote`)
+- Ribbon icons are loaded via the `loadImage` callback, returning `IStream` (PNG data)
+- The add-in uses the OneNote Interop API (`Microsoft.Office.Interop.OneNote`)
 - Ribbon UI is defined in `ribbon.xml` and loaded via `IRibbonExtensibility`
 - Ink operations work with OneNote's XML page format
 

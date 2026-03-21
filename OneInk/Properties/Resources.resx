@@ -31,7 +31,7 @@
               <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
               <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
               <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
-              <xsd:attribute ref="xml:space" msdata:Ordinal="5" />
+              <xsd:attribute ref="xml:space" />
             </xsd:complexType>
           </xsd:element>
           <xsd:element name="resheader">
@@ -62,10 +62,10 @@
     <value>&lt;customUI xmlns="http://schemas.microsoft.com/office/2006/01/customui" loadImage="GetImage"&gt;
     &lt;ribbon&gt;
         &lt;tabs&gt;
-            &lt;tab id="tabOneInk" label="OneInk"&gt;
-                &lt;group id="groupInkTools" label="Ink Tools"&gt;
-                    &lt;button id="buttonClearInk" label="Clear All Ink" size="large" screentip="Remove all ink strokes from current page" onAction="ClearInkButtonClicked" image="Logo.png"/&gt;
-                    &lt;button id="buttonDeleteByColor" label="Delete by Color" size="large" screentip="Delete ink strokes by selected color" onAction="SelectInkColorButtonClicked" image="Logo.png"/&gt;
+            &lt;tab id="tabOneInk" getLabel="GetLabel"&gt;
+                &lt;group id="groupInkTools" getLabel="GetLabel"&gt;
+                    &lt;button id="buttonClearInk" getLabel="GetLabel" size="large" getScreentip="GetScreentip" onAction="ClearInkButtonClicked" image="ClearAll.png"/&gt;
+                    &lt;button id="buttonDeleteByColor" getLabel="GetLabel" size="large" getScreentip="GetScreentip" onAction="SelectInkColorButtonClicked" image="DeleteByColor.png"/&gt;
                 &lt;/group&gt;
             &lt;/tab&gt;
         &lt;/tabs&gt;

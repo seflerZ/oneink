@@ -19,47 +19,14 @@ using System.Windows.Forms;
 using System.Xml.Linq;
 using Extensibility;
 using Microsoft.Office.Core;
-using OneInk.Utilities;
-using Application = Microsoft.Office.Interop.OneNote.Application;  // Conflicts with System.Windows.Forms
-using IPicture = stdole.IPicture;
-using IPictureDisp = stdole.IPictureDisp;
+using Application = Microsoft.Office.Interop.OneNote.Application;
+using IRibbonControl = Microsoft.Office.Core.IRibbonControl;
+using IStream = System.Runtime.InteropServices.ComTypes.IStream;
 
 #pragma warning disable CS3003 // Type is not CLS-compliant
 
 namespace OneInk
 {
-    #region COM Interop for IPictureDisp creation
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal class PICTDESC
-    {
-        public int cbSizeOfStruct = Marshal.SizeOf(typeof(PICTDESC));
-        public int picType;
-        public IntPtr hicon;
-        public IntPtr hbitmap;
-        public IntPtr pstrName;
-        public int wBrush;
-    }
-
-    internal static partial class OlePictureFactory
-    {
-        [DllImport("oleaut32.dll", PreserveSig = false)]
-        private static extern void OleCreatePictureIndirect(
-            [MarshalAs(UnmanagedType.LPStruct)] PICTDESC lpPictDesc,
-            [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
-            [MarshalAs(UnmanagedType.Bool)] bool fOwn,
-            out IPictureDisp ppvObj);
-
-        public static IPictureDisp CreateIconPicture(IntPtr hicon)
-        {
-            var pictDesc = new PICTDESC { picType = 3 /* PICTYPE_ICON */, hicon = hicon };
-            OleCreatePictureIndirect(pictDesc, typeof(IPictureDisp).GUID, true, out IPictureDisp picture);
-            return picture;
-        }
-    }
-
-    #endregion
-
     /// <summary>
     /// Main COM AddIn class for OneNote ink operations.
     /// Implements IDTExtensibility2 for COM add-in lifecycle and IRibbonExtensibility for ribbon UI.
@@ -390,12 +357,60 @@ namespace OneInk
         }
 
         /// <summary>
-        /// Specified in Ribbon.xml loadImage callback, this method returns the image to display on the ribbon button.
-        /// Ribbon loadImage expects an IPictureDisp return type.
+        /// Returns the localized label for a ribbon control.
+        /// </summary>
+        public string GetLabel(IRibbonControl control)
+        {
+            try
+            {
+                string label;
+                switch (control.Id)
+                {
+                    case "tabOneInk": label = Strings.RibbonTabLabel; break;
+                    case "groupInkTools": label = Strings.RibbonGroupLabel; break;
+                    case "buttonClearInk": label = Strings.ButtonClearInkLabel; break;
+                    case "buttonDeleteByColor": label = Strings.ButtonDeleteByColorLabel; break;
+                    default: label = null; break;
+                }
+                return label;
+            }
+            catch (Exception ex)
+            {
+                Log($"GetLabel({control.Id}) ERROR: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Returns the localized screentip for a ribbon control.
+        /// </summary>
+        public string GetScreentip(IRibbonControl control)
+        {
+            try
+            {
+                string tip;
+                switch (control.Id)
+                {
+                    case "buttonClearInk": tip = Strings.ButtonClearInkScreentip; break;
+                    case "buttonDeleteByColor": tip = Strings.ButtonDeleteByColorScreentip; break;
+                    default: tip = null; break;
+                }
+                return tip;
+            }
+            catch (Exception ex)
+            {
+                Log($"GetScreentip({control.Id}) ERROR: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Specified as the loadImage callback in Ribbon.xml, this method returns the
+        /// image to display on the ribbon button.
         /// </summary>
         /// <param name="imageName">The name of the image to retrieve.</param>
-        /// <returns>IPictureDisp containing the image data.</returns>
-        public IPictureDisp GetImage(string imageName)
+        /// <returns>IStream containing the PNG image data.</returns>
+        public IStream GetImage(string imageName)
         {
             try
             {
@@ -404,12 +419,11 @@ namespace OneInk
                 if (!File.Exists(imagePath))
                     imagePath = Path.Combine(assemblyDir, imageName);
                 if (!File.Exists(imagePath))
-                    return null;
-                using (var bitmap = new Bitmap(imagePath))
                 {
-                    var iconHandle = bitmap.GetHicon();
-                    return OlePictureFactory.CreateIconPicture(iconHandle);
+                    return null;
                 }
+                using (var bitmap = new Bitmap(imagePath))
+                    return bitmap.GetReadOnlyStream();
             }
             catch
             {

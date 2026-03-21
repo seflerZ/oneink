@@ -1,25 +1,22 @@
 # OneInk - Uninstall Script
-# Unregisters the COM AddIn and removes files
+# Unregisters the COM AddIn and removes files installed via .\deploy.ps1 -Mode Production
+#
+# Usage:
+#   .\uninstall.ps1 -Platform x64
+
+. "$PSScriptRoot\config.ps1"
 
 param(
     [ValidateSet("x86", "x64", "arm64")]
     [string]$Platform = "x64"
 )
 
-. "$PSScriptRoot\config.ps1"
-
-$InstallPath = if ($Platform -eq "x86") {
-    "C:\Program Files\OneInk"
-} elseif ($Platform -eq "x64") {
-    $Global:InstallPathX64
-} else {
-    $Global:InstallPathARM64
-}
-
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "OneInk - Uninstall ($Platform)" -ForegroundColor Cyan
 Write-Host "========================================"
 Write-Host
+
+$InstallPath = if ($Platform -eq "x64") { $Global:InstallPathX64 } else { $Global:InstallPathARM64 }
 
 # 1. Unregister COM
 Write-Host "[1/3] Unregistering COM AddIn..." -ForegroundColor Yellow
@@ -30,7 +27,7 @@ if (Test-Path $addinDll) {
     & $RegAsm /u $addinDll
     Write-Host "  regasm /u done." -ForegroundColor Green
 } else {
-    Write-Host "  DLL not found at $addinDll, skipping regasm /u." -ForegroundColor Yellow
+    Write-Host "  DLL not found, skipping regasm /u." -ForegroundColor Yellow
 }
 
 # 2. Remove registry entries
@@ -45,7 +42,7 @@ foreach ($path in $regPaths) {
         Remove-Item $path -Recurse -Force
         Write-Host "  Removed: $path" -ForegroundColor Green
     } else {
-        Write-Host "  Not found (already clean): $path" -ForegroundColor Gray
+        Write-Host "  Not found: $path" -ForegroundColor Gray
     }
 }
 
@@ -55,12 +52,8 @@ if (Test-Path $InstallPath) {
     Remove-Item $InstallPath -Recurse -Force
     Write-Host "  Removed: $InstallPath" -ForegroundColor Green
 } else {
-    Write-Host "  Not found (already clean): $InstallPath" -ForegroundColor Gray
+    Write-Host "  Not found: $InstallPath" -ForegroundColor Gray
 }
 
 Write-Host
-Write-Host "========================================" -ForegroundColor Green
-Write-Host "[OK] Uninstall complete!" -ForegroundColor Green
-Write-Host "========================================" -ForegroundColor Green
-Write-Host
-Write-Host "Restart OneNote to confirm the add-in is removed." -ForegroundColor Yellow
+Write-Host "Restart OneNote to confirm the add-in is removed." -ForegroundColor Cyan
