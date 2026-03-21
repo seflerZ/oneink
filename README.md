@@ -4,8 +4,8 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 
 ## Features
 
-- **Clear All Ink**: Remove all ink strokes from the current page
-- **Delete Ink by Color**: Select a color and delete all strokes of that color (accurate color detection via Microsoft.Ink API)
+- **Clear All Ink**: Remove ink strokes from the current page — if ink is selected (lasso), only selected ink is removed
+- **Delete Ink by Color**: Select a color and delete strokes of that color — if ink is selected (lasso), only selected ink colors are shown and deleted
 
 ## Requirements
 
@@ -51,7 +51,7 @@ Output: `OneInk\bin\x64\Release\`
 .\uninstall.ps1 -Platform x64
 ```
 
-> Note: Only for production installations. Dev mode registration is cleaned up automatically by the system when the build directory changes.
+> Note: Only for production installations. Dev mode uses HKCU registration (no admin), cleaned up automatically by rebuilding with different paths.
 
 ## Configuration
 
@@ -61,8 +61,8 @@ All paths are centralized in `config.ps1`. Edit this file if MSBuild or other to
 
 After installation, open OneNote. A **OneInk** tab appears in the ribbon with two buttons:
 
-- **Clear All Ink**: Removes all ink strokes from the current page
-- **Delete by Color**: Opens a dialog listing detected ink colors; select one to delete all strokes of that color
+- **Clear All Ink**: Removes ink strokes from the current page — if ink is selected (lasso selection), only selected ink is removed
+- **Delete by Color**: Opens a dialog listing detected ink colors on the page — if ink is selected (lasso selection), only selected ink colors are shown; select a color to delete matching strokes
 
 ## Project Structure
 
@@ -83,6 +83,8 @@ OneInk/
 ├── build.ps1               # Build script
 ├── deploy.ps1             # Deployment script (Dev + Production modes)
 ├── uninstall.ps1           # Production uninstall script
+├── docs/                    # Development notes and learnings
+│   └── learning.md
 └── Setup/                  # Installer project
     └── Setup.vdproj
 ```
@@ -93,6 +95,7 @@ OneInk/
 - The add-in uses the OneNote Interop API (`Microsoft.Office.Interop.OneNote`)
 - Ribbon UI is defined in `ribbon.xml` and loaded via `IRibbonExtensibility`
 - Ink operations work with OneNote's XML page format
+- Selection detection: `piBinaryDataSelection` returns `selected="all"` on selected `InkDrawing` elements; `piBinaryData` provides ISF stroke data — use both via objectID matching
 
 ## License
 
