@@ -1,8 +1,6 @@
 # OneInk - Build Script
 # Builds the project to the bin directory
 
-. "$PSScriptRoot\config.ps1"
-
 param(
     [ValidateSet("x86", "x64", "arm64")]
     [string]$Platform = "x64",
@@ -10,6 +8,8 @@ param(
     [ValidateSet("Debug", "Release")]
     [string]$Configuration = "Release"
 )
+
+. "$PSScriptRoot\config.ps1"
 
 Write-Host "Building OneInk ($Platform) - $Configuration..." -ForegroundColor Cyan
 & $Global:MSBuildPath $Global:ProjectFile /p:Configuration=$Configuration /p:Platform=$Platform /t:Rebuild /v:m

@@ -4,12 +4,12 @@
 # Usage:
 #   .\uninstall.ps1 -Platform x64
 
-. "$PSScriptRoot\config.ps1"
-
 param(
     [ValidateSet("x86", "x64", "arm64")]
     [string]$Platform = "x64"
 )
+
+. "$PSScriptRoot\config.ps1"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "OneInk - Uninstall ($Platform)" -ForegroundColor Cyan

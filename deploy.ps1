@@ -8,8 +8,6 @@
 #   Register from build dir (development):
 #     .\deploy.ps1 -Mode Dev
 
-. "$PSScriptRoot\config.ps1"
-
 param(
     [ValidateSet("Production", "Dev")]
     [string]$Mode = "Dev",
@@ -17,6 +15,8 @@ param(
     [ValidateSet("x86", "x64", "arm64")]
     [string]$Platform = "x64"
 )
+
+. "$PSScriptRoot\config.ps1"
 
 $ErrorActionPreference = "Stop"
 
@@ -90,24 +90,40 @@ if ($Mode -eq "Production") {
     $BuildDir = Join-Path (Split-Path $Global:ProjectFile) "bin\$Platform\Release"
 
     Write-Host "[1/2] Registering from build dir: $BuildDir" -ForegroundColor Yellow
-    $RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } else { $Global:RegAsmX64 }
-    Set-Location $BuildDir
-    & $RegAsm /codebase "$BuildDir\OneInk.dll"
 
-    # Clean HKCU CLSID (in case old HKCU registration exists)
-    $hkcuClsId = "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
-    if (Test-Path $hkcuClsId) { Remove-Item $hkcuClsId -Recurse -Force }
+    # Clean HKLM CLSID/AppID (best effort - may need admin)
+    $hklmClsId = "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
+    $hklmAppId = "HKLM:\SOFTWARE\Classes\AppID\$Global:AddInAppID"
+    try {
+        if (Test-Path $hklmClsId) { Remove-Item $hklmClsId -Recurse -Force -EA SilentlyContinue }
+        if (Test-Path $hklmAppId) { Remove-Item $hklmAppId -Recurse -Force -EA SilentlyContinue }
+    } catch { }
 
-    # Ensure HKCU AddIn entry exists with LoadBehavior=3
+    # HKCU: AppID with DllSurrogate
+    New-Item -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Force | Out-Null
+    Set-ItemProperty -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Name DllSurrogate -Value ""
+
+    # HKCU: CLSID with InprocServer32 pointing to mscoree.dll + CodeBase
+    $clsidPath = "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
+    New-Item -Path $clsidPath -Force | Out-Null
+    Set-ItemProperty -Path $clsidPath -Name AppID -Value $Global:AddInAppID
+
+    $inprocPath = "$clsidPath\InprocServer32"
+    New-Item -Path $inprocPath -Force | Out-Null
+    Set-ItemProperty -Path $inprocPath -Name "(Default)" -Value "mscoree.dll"
+    Set-ItemProperty -Path $inprocPath -Name ThreadingModel -Value "Both"
+    Set-ItemProperty -Path $inprocPath -Name CodeBase -Value "file:///$($BuildDir.Replace('\', '/'))/OneInk.dll"
+
+    # HKCU AddIn entry (LoadBehavior=3)
     $addinRegPath = "HKCU:\SOFTWARE\Microsoft\Office\OneNote\AddIns\OneInk.AddIn"
     if (-not (Test-Path $addinRegPath)) { New-Item -Path $addinRegPath -Force | Out-Null }
     Set-ItemProperty -Path $addinRegPath -Name LoadBehavior -Value 3 -Type DWord
     Write-Host "[OK]" -ForegroundColor Green
 
     Write-Host "[2/2] Verification..." -ForegroundColor Yellow
-    $hklmCodeBase = (Get-ItemProperty "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID" 'CodeBase' -EA SilentlyContinue).CodeBase
+    $hkcuCodeBase = (Get-ItemProperty "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID\InprocServer32" 'CodeBase' -EA SilentlyContinue).CodeBase
     $hkcuLB = (Get-ItemProperty $addinRegPath 'LoadBehavior' -EA SilentlyContinue).LoadBehavior
-    Write-Host "  HKLM CodeBase : $hklmCodeBase" -ForegroundColor $(if ($hklmCodeBase -like "*\bin\$Platform\Release*") { "Green" } else { "Yellow" })
+    Write-Host "  HKCU CodeBase : $hkcuCodeBase" -ForegroundColor $(if ($hkcuCodeBase -like "*\bin\$Platform\Release*") { "Green" } else { "Yellow" })
     Write-Host "  HKCU LoadBehavior: $hkcuLB" -ForegroundColor $(if ($hkcuLB -eq 3) { "Green" } else { "Red" })
     Write-Host "[OK] Dev registration complete!" -ForegroundColor Green
 }

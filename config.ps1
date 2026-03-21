@@ -10,8 +10,8 @@ $Global:MSBuildPath = if (Test-Path $VsWhere) {
 }
 
 # Project paths
-$Global:ProjectRoot = Split-Path -Parent $PSScriptRoot
-$Global:ProjectFile = Join-Path $Global:ProjectRoot "OneInk\OneInk.csproj"
+$Global:ProjectRoot = $PSScriptRoot
+$Global:ProjectFile = Join-Path $PSScriptRoot "OneInk\OneInk.csproj"
 
 # .NET Framework regasm paths
 $Global:RegAsmX86 = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe"

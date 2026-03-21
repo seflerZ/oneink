@@ -7,14 +7,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Drawing.Imaging;
 using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using ClassInterfaceType = System.Runtime.InteropServices.ClassInterfaceType;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml.Linq;
 using Extensibility;
@@ -55,26 +52,9 @@ namespace OneInk
         /// </summary>
         protected Application OneNoteApplication { get; set; }
 
-        static AddIn()
-        {
-            // Static constructor - this runs BEFORE any instance is created
-            // This helps us see if the class is even being loaded
-            try
-            {
-                var logPath = Path.Combine(Path.GetTempPath(), "OneInk.log");
-                var msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] === STATIC CONSTRUCTOR === Assembly loaded: {System.Reflection.Assembly.GetExecutingAssembly().Location}";
-                File.AppendAllText(logPath, msg + Environment.NewLine);
-                Debug.WriteLine(msg);
-            }
-            catch { }
-        }
-
         public AddIn()
         {
             Log("OneInk loaded");
-
-            // For debugging: uncomment to force debugger attach
-            // if (!Debugger.IsAttached) { Debugger.Launch(); }
         }
 
         /// <summary>
@@ -155,6 +135,8 @@ namespace OneInk
 
         /// <summary>
         /// Button click handler for clearing all ink on current page.
+        /// If the user has ink selected on the page, only selected ink is cleared.
+        /// Otherwise, all ink on the page is cleared.
         /// </summary>
         /// <param name="control">The ribbon control that triggered the action.</param>
         public void ClearInkButtonClicked(IRibbonControl control)
@@ -169,8 +151,25 @@ namespace OneInk
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
 
-                string xml;
-                OneNoteApplication.GetPageContent(pageId, out xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
+                // Step 1: Get selection metadata (has selected="all" on selected InkDrawings)
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryDataSelection);
+
+                var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument docSel;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
+                    docSel = XDocument.Load(reader);
+                XNamespace ns = docSel.Root.Name.Namespace;
+
+                var selInkElements = docSel.Descendants(ns + "InkDrawing").ToList();
+                var selectedObjectIds = new HashSet<string>(
+                    selInkElements.Where(e => e.Attribute("selected")?.Value == "all")
+                                  .Select(e => e.Attribute("objectID")?.Value ?? "")
+                                  .Where(id => !string.IsNullOrEmpty(id))
+                );
+                bool hasSelection = selectedObjectIds.Count > 0;
+
+                // Step 2: Get full page with ISF data for deletion
+                OneNoteApplication.GetPageContent(pageId, out string xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
 
                 if (string.IsNullOrEmpty(xml))
                 {
@@ -182,7 +181,6 @@ namespace OneInk
                 XDocument doc;
                 using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xml), settings))
                     doc = XDocument.Load(reader);
-                XNamespace ns = doc.Root.Name.Namespace;
 
                 var inkElements = doc.Descendants(ns + "InkDrawing").ToList();
 
@@ -192,12 +190,22 @@ namespace OneInk
                     return;
                 }
 
+                int deletedCount = 0;
                 foreach (var ink in inkElements)
                 {
-                    string objectId = ink.Attribute("objectID")?.Value;
+                    string objectId = ink.Attribute("objectID")?.Value ?? "";
+                    if (hasSelection && !selectedObjectIds.Contains(objectId))
+                        continue;
+
                     if (!string.IsNullOrEmpty(objectId))
+                    {
                         OneNoteApplication.DeletePageContent(pageId, objectId);
+                        deletedCount++;
+                    }
                 }
+
+                if (deletedCount == 0)
+                    MessageBox.Show(hasSelection ? Strings.NoInkStrokesInSelection : Strings.NoInkStrokes);
             }
             catch (Exception ex)
             {
@@ -209,6 +217,7 @@ namespace OneInk
         /// Button click handler for deleting ink strokes by selected color.
         /// Parses ISF (Ink Serialized Format) data from each InkDrawing to extract
         /// accurate stroke colors, then deletes matching strokes.
+        /// If the user has ink selected, only selected ink is considered.
         /// </summary>
         /// <param name="control">The ribbon control that triggered the action.</param>
         public void SelectInkColorButtonClicked(IRibbonControl control)
@@ -223,8 +232,25 @@ namespace OneInk
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
 
-                string xml;
-                OneNoteApplication.GetPageContent(pageId, out xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
+                // Step 1: Get selection metadata (has selected="all" on selected InkDrawings)
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryDataSelection);
+
+                var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument docSel;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
+                    docSel = XDocument.Load(reader);
+                XNamespace ns = docSel.Root.Name.Namespace;
+
+                var selInkElements = docSel.Descendants(ns + "InkDrawing").ToList();
+                var selectedObjectIds = new HashSet<string>(
+                    selInkElements.Where(e => e.Attribute("selected")?.Value == "all")
+                                  .Select(e => e.Attribute("objectID")?.Value ?? "")
+                                  .Where(id => !string.IsNullOrEmpty(id))
+                );
+                bool hasSelection = selectedObjectIds.Count > 0;
+
+                // Step 2: Get full page with ISF data
+                OneNoteApplication.GetPageContent(pageId, out string xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
 
                 if (string.IsNullOrEmpty(xml))
                 {
@@ -236,7 +262,6 @@ namespace OneInk
                 XDocument doc;
                 using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xml), settings))
                     doc = XDocument.Load(reader);
-                XNamespace ns = doc.Root.Name.Namespace;
 
                 var inkElements = doc.Descendants(ns + "InkDrawing").ToList();
 
@@ -251,7 +276,11 @@ namespace OneInk
 
                 foreach (var ink in inkElements)
                 {
-                    string objectId = ink.Attribute("objectID")?.Value;
+                    string objectId = ink.Attribute("objectID")?.Value ?? "";
+
+                    // If there's a selection, only consider selected ink
+                    if (hasSelection && !selectedObjectIds.Contains(objectId))
+                        continue;
 
                     var dataEl = ink.Element(ns + "Data");
                     string isfBase64 = dataEl?.Value.Trim();
@@ -286,7 +315,7 @@ namespace OneInk
 
                 if (colorCounts.Count == 0)
                 {
-                    MessageBox.Show(Strings.NoInkStrokes);
+                    MessageBox.Show(hasSelection ? Strings.NoInkStrokesInSelection : Strings.NoInkStrokes);
                     return;
                 }
 
