@@ -34,7 +34,7 @@ if ($Mode -eq "Production") {
     Write-Host "[OK] Build completed" -ForegroundColor Green
 
     # 2. Copy to Program Files
-    $OutputPath = if ($Platform -eq "x64") { $Global:InstallPathX64 } else { $Global:InstallPathARM64 }
+    $OutputPath = $Global:InstallPath
     Write-Host "[2/4] Copying to $OutputPath ..." -ForegroundColor Yellow
     if (-not (Test-Path $OutputPath)) {
         New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
@@ -54,20 +54,24 @@ if ($Mode -eq "Production") {
     )
     foreach ($path in $hklmPaths) { if (Test-Path $path) { Remove-Item $path -Recurse -Force } }
 
-    $RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } else { $Global:RegAsmX64 }
+    $RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } elseif ($Platform -eq "arm64") { $Global:RegAsmARM64 } else { $Global:RegAsmX64 }
     Set-Location $OutputPath
-    & $RegAsm /codebase "$OutputPath\OneInk.dll"
+    & $RegAsm /codebase /tlb "$OutputPath\OneInk.dll"
+    if ($LASTEXITCODE -ne 0) { Write-Host "[WARNING] regasm exited with code $LASTEXITCODE" -ForegroundColor Yellow }
 
     # HKLM AppID + DllSurrogate
     New-Item -Path "HKLM:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Force | Out-Null
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Name DllSurrogate -Value ""
     Set-ItemProperty -Path "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID" -Name AppID -Value $Global:AddInAppID
 
-    # Fix InprocServer32 CodeBase
+    # Fix InprocServer32 with all required entries for .NET COM
     $inprocPath = "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID\InprocServer32"
     New-Item -Path $inprocPath -Force | Out-Null
     Set-ItemProperty -Path $inprocPath -Name "(Default)" -Value "mscoree.dll"
     Set-ItemProperty -Path $inprocPath -Name ThreadingModel -Value "Both"
+    Set-ItemProperty -Path $inprocPath -Name Class -Value "OneInk.AddIn"
+    Set-ItemProperty -Path $inprocPath -Name Assembly -Value "OneInk, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+    Set-ItemProperty -Path $inprocPath -Name RuntimeVersion -Value "v4.0.30319"
     Set-ItemProperty -Path $inprocPath -Name CodeBase -Value "file:///$($OutputPath.Replace('\', '/'))/OneInk.dll"
 
     # HKCU AddIn (must be last — regasm resets LoadBehavior)
@@ -76,6 +80,7 @@ if ($Mode -eq "Production") {
     Set-ItemProperty -Path $addinRegPath -Name LoadBehavior -Value 3 -Type DWord
     Set-ItemProperty -Path $addinRegPath -Name FriendlyName -Value "OneInk"
     Set-ItemProperty -Path $addinRegPath -Name Description -Value "OneInk - OneNote Ink Operations COM AddIn"
+    Set-ItemProperty -Path $addinRegPath -Name CommandLineSafe -Value 1 -Type DWord
     Write-Host "[OK]" -ForegroundColor Green
 
     # 4. Verify

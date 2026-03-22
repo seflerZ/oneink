@@ -11,10 +11,12 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 ## Requirements
 
 - Windows 10/11
-- Microsoft OneNote (Office 2016 or later, x64 or ARM64)
+- Microsoft OneNote (Office 2016 or later, **x64**)
 - .NET Framework 4.8
 - Visual Studio 2022 (for building)
 - PowerShell 5.1+ (for deployment scripts)
+
+> **Note for ARM64 Windows users**: Even on ARM64 Windows, Office is typically installed as **x64** (for compatibility). If your Office is x64, follow the x64 installation instructions below — do NOT use the arm64 platform option.
 
 ## Building
 
@@ -29,7 +31,7 @@ Output: `OneInk\bin\x64\Release\`
 ### Development Mode (recommended for active development)
 
 ```powershell
-.\deploy.ps1 -Mode Dev -Platform x64
+.\deploy.ps1 -Mode Dev
 ```
 
 - Registers the add-in from the build output directory (`OneInk\bin\x64\Release\`)
@@ -39,17 +41,17 @@ Output: `OneInk\bin\x64\Release\`
 ### Production Mode (for end-user installation)
 
 ```powershell
-.\deploy.ps1 -Mode Production -Platform x64
+.\deploy.ps1 -Mode Production
 ```
 
-- Builds Release, copies to `C:\Program Files\OneInk-x64`
+- Builds Release, copies to `C:\Program Files\OneInk`
 - Registers COM AddIn (requires administrator privileges)
 - Sets HKLM registry entries + HKCU LoadBehavior
 
 ## Uninstallation
 
 ```powershell
-.\uninstall.ps1 -Platform x64
+.\uninstall.ps1
 ```
 
 > Note: Only for production installations. Dev mode uses HKCU registration (no admin), cleaned up automatically by rebuilding with different paths.
@@ -89,13 +91,9 @@ OneInk/
 │       └── Resources.resx   # Ribbon XML + embedded strings
 ├── config.ps1               # Centralized configuration
 ├── build.ps1               # Build script
-├── deploy.ps1             # Deployment script (Dev + Production modes)
+├── deploy.ps1              # Deployment script (Dev + Production modes)
 ├── uninstall.ps1           # Production uninstall script
-├── docs/                  # Development notes and learnings
-│   ├── learning.md
-│   └── ribbon-learning.md
-└── Setup/                  # Installer project
-    └── Setup.vdproj
+└── docs/                   # Development notes and learnings
 ```
 
 ## Development Notes

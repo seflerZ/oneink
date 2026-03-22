@@ -1,6 +1,6 @@
 # OneNote COM AddIn 开发完整指南
 
-> 基于 OneInk 项目开发经验总结 - 2026 年 3 月 18 日
+> 基于 OneInk 项目开发经验总结 - 2026 年 3 月 22 日
 
 ---
 
@@ -36,6 +36,16 @@ OneNote → File → Account → About OneNote
 reg query "HKLM\SOFTWARE\Microsoft\Office\ClickToRun\Configuration" /v Platform
 ```
 输出 `x64` 或 `x86`，决定你需要编译的 DLL 架构。
+
+### ARM64 Office 支持
+ARM64 Windows 上的 Office 可能也是 ARM64 版本（如 Office Mobile）。如果 Office 是 ARM64 版本，则需要：
+
+```powershell
+# ARM64 Office 需要的 RegAsm 路径
+$regasm = "C:\Windows\Microsoft.NET\FrameworkArm64\v4.0.30319\regasm.exe"
+```
+
+**注意**：确认 Office 架构非常重要。ARM64 Windows 上的 Office 通常仍是 x64 版本（兼容性考虑）。
 
 ---
 
@@ -312,6 +322,10 @@ OneNote COM AddIn 需要以下注册表配置才能正常工作：
 
 ### 3. COM 注册表
 
+**⚠️ 关键：InprocServer32 必须包含 `Assembly` 和 `RuntimeVersion`**
+
+仅设置 `CodeBase` 是不够的，.NET CLR 需要这两个条目来定位和加载程序集：
+
 ```registry
 [HKEY_CLASSES_ROOT\CLSID\{YOUR-GUID}]
 @="YourAddIn.AddIn"
@@ -319,9 +333,9 @@ OneNote COM AddIn 需要以下注册表配置才能正常工作：
 [HKEY_CLASSES_ROOT\CLSID\{YOUR-GUID}\InprocServer32]
 @="mscoree.dll"
 "ThreadingModel"="Both"
-"Class"="YourAddIn.AddIn"
+"Class"="YourAddIn.AddIn"           ; ProgId 类名
 "Assembly"="YourAddIn, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
-"RuntimeVersion"="v4.0.30319"
+"RuntimeVersion"="v4.0.30319"      ; 必须与目标 .NET Framework 版本匹配
 "CodeBase"="file:///C:/Program Files/YourAddIn/YourAddIn.DLL"
 ```
 
@@ -357,6 +371,9 @@ $regasm = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regasm.exe"
 
 # 32 位 Office - 使用 Framework
 $regasm = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe"
+
+# ARM64 Office - 使用 FrameworkArm64
+$regasm = "C:\Windows\Microsoft.NET\FrameworkArm64\v4.0.30319\regasm.exe"
 ```
 
 ### 2. 完整注册流程
@@ -414,23 +431,34 @@ $com = New-Object -ComObject "YourAddIn.AddIn"
 **可能原因：**
 1. ❌ 缺少 DllSurrogate 配置
 2. ❌ 注册表路径包含版本号（如 16.0）
-3. ❌ 使用了 32 位 regasm 注册 64 位 DLL
+3. ❌ 使用了 32 位 regasm 注册 64 位 DLL（或反之）
 4. ❌ DLL 在用户目录下
+5. ❌ InprocServer32 缺少 `Assembly` 和 `RuntimeVersion` 条目
+6. ❌ 缺少 `CommandLineSafe` 注册项
 
 **解决方案：**
 ```powershell
 # 1. 添加 DllSurrogate
-New-Item -Path "HKCR:\AppID\{YOUR-GUID}" -Force
-New-ItemProperty -Path "HKCR:\AppID\{YOUR-GUID}" -Name "DllSurrogate" -Value ""
+New-Item -Path "HKLM:\SOFTWARE\Classes\AppID\{YOUR-GUID}" -Force
+New-ItemProperty -Path "HKLM:\SOFTWARE\Classes\AppID\{YOUR-GUID}" -Name "DllSurrogate" -Value ""
 
-# 2. 使用正确的注册表路径
-# HKCU\Software\Microsoft\Office\OneNote\AddIns\YourAddIn.AddIn
+# 2. 完善 InprocServer32（.NET COM 激活必需）
+# 确保有以下条目：
+# - (Default) = "mscoree.dll"
+# - ThreadingModel = "Both"
+# - Class = "YourAddIn.AddIn"
+# - Assembly = "YourAddIn, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+# - RuntimeVersion = "v4.0.30319"
+# - CodeBase = "file:///C:/Program Files/YourAddIn/YourAddIn.DLL"
 
-# 3. 使用 64 位 regasm
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regasm.exe
+# 3. 添加 CommandLineSafe
+New-ItemProperty -Path "HKCU:\Software\Microsoft\Office\OneNote\AddIns\YourAddIn.AddIn" `
+  -Name "CommandLineSafe" -Value 1 -PropertyType DWord -Force
 
-# 4. 移动 DLL 到 Program Files
-C:\Program Files\YourAddIn\
+# 4. 使用正确的 regasm 匹配 Office 架构
+# x64 Office: Framework64
+# x86 Office: Framework
+# ARM64 Office: FrameworkArm64
 ```
 
 ### 问题 2: LoadBehavior 从 3 变成 2
@@ -440,8 +468,16 @@ C:\Program Files\YourAddIn\
 **排查步骤：**
 1. 检查 Fusion 日志：`C:\FusionLogs\`
 2. 检查事件查看器：Windows Logs → Application → .NET Runtime
-3. 验证 DLL 签名
-4. 检查依赖项是否完整
+3. 验证 DLL 架构与 Office 匹配（x64 Office 需要 x64 DLL）
+4. 检查依赖项是否完整（特别是 Microsoft.Ink.dll 等）
+5. 确认 InprocServer32 包含 `Assembly` 和 `RuntimeVersion` 条目
+6. 确认已添加 `CommandLineSafe=1`
+
+**PowerShell 测试 COM 对象：**
+```powershell
+# 如果此命令失败，说明 COM 注册有问题
+$com = New-Object -ComObject "YourAddIn.AddIn"
+```
 
 ### 问题 3: 提示"不是有效的 Office 加载项"
 
@@ -553,14 +589,15 @@ Get-Content "C:\temp\clsid.reg" | Select-String "CodeBase|InprocServer32"
 - [ ] 复制所有依赖 DLL
 
 ### 注册时
-- [ ] 使用正确的 regasm（Framework64 或 Framework）
+- [ ] 使用正确的 regasm（Framework64 / Framework / FrameworkArm64）
 - [ ] 使用 /codebase 参数
-- [ ] 使用 /tlb 参数（推荐）
+- [ ] 使用 /tlb 参数（生成类型库，PowerShell COM 创建需要）
 - [ ] 添加 DllSurrogate
 - [ ] 关联 AppID
 - [ ] 设置 OneNote 注册表路径（无版本号）
 - [ ] 设置 LoadBehavior = 3
 - [ ] 设置 CommandLineSafe = 1
+- [ ] InprocServer32 必须包含 Assembly + RuntimeVersion + CodeBase + Class
 
 ### 测试前
 - [ ] 完全关闭 OneNote（任务管理器）
@@ -609,6 +646,6 @@ Windows Registry Editor Version 5.00
 
 ---
 
-**文档版本**: 1.0  
-**更新日期**: 2026-03-18  
+**文档版本**: 1.1
+**更新日期**: 2026-03-22
 **基于项目**: OneInk, NoteHighlight2016, OnenoteAddin, VanillaAddIn

@@ -16,10 +16,10 @@ $Global:ProjectFile = Join-Path $PSScriptRoot "OneInk\OneInk.csproj"
 # .NET Framework regasm paths
 $Global:RegAsmX86 = "C:\Windows\Microsoft.NET\Framework\v4.0.30319\regasm.exe"
 $Global:RegAsmX64 = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\regasm.exe"
+$Global:RegAsmARM64 = "C:\Windows\Microsoft.NET\FrameworkArm64\v4.0.30319\regasm.exe"
 
 # Install destinations
-$Global:InstallPathX64 = "C:\Program Files\OneInk-x64"
-$Global:InstallPathARM64 = "C:\Program Files\OneInk-arm64"
+$Global:InstallPath = "C:\Program Files\OneInk"
 
 # COM AddIn CLSID
 $Global:AddInCLSID = "{E1F2A3B4-CF2D-409B-B65A-BDBACB9F21DC}"

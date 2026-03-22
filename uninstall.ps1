@@ -16,15 +16,16 @@ Write-Host "OneInk - Uninstall ($Platform)" -ForegroundColor Cyan
 Write-Host "========================================"
 Write-Host
 
-$InstallPath = if ($Platform -eq "x64") { $Global:InstallPathX64 } else { $Global:InstallPathARM64 }
+$InstallPath = $Global:InstallPath
 
 # 1. Unregister COM
 Write-Host "[1/3] Unregistering COM AddIn..." -ForegroundColor Yellow
-$RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } else { $Global:RegAsmX64 }
+$RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } elseif ($Platform -eq "arm64") { $Global:RegAsmARM64 } else { $Global:RegAsmX64 }
 $addinDll = Join-Path $InstallPath "OneInk.dll"
 if (Test-Path $addinDll) {
     Set-Location $InstallPath
     & $RegAsm /u $addinDll
+    Set-Location $PSScriptRoot
     Write-Host "  regasm /u done." -ForegroundColor Green
 } else {
     Write-Host "  DLL not found, skipping regasm /u." -ForegroundColor Yellow

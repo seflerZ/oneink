@@ -1,5 +1,8 @@
 # OneInk 开发经验总结
 
+> 文档版本：1.1（2026-03-22）
+> 记录了 COM AddIn 注册、ISF 墨迹处理等关键经验
+
 ## 1. PowerShell 脚本中 param 块必须放在最前面
 
 PowerShell 脚本中，`param()` 块**必须**放在文件的最前面（注释除外），在任何其他语句（包括 dot-source）之前。
@@ -58,12 +61,18 @@ $inprocPath = "$clsidPath\InprocServer32"
 New-Item -Path $inprocPath -Force
 Set-ItemProperty -Path $inprocPath -Name "(Default)" -Value "mscoree.dll"
 Set-ItemProperty -Path $inprocPath -Name ThreadingModel -Value "Both"
+Set-ItemProperty -Path $inprocPath -Name Class -Value "OneInk.AddIn"
+Set-ItemProperty -Path $inprocPath -Name Assembly -Value "OneInk, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+Set-ItemProperty -Path $inprocPath -Name RuntimeVersion -Value "v4.0.30319"
 Set-ItemProperty -Path $inprocPath -Name CodeBase -Value "file:///$($buildDir.Replace('\', '/'))/OneInk.dll"
 
 # HKCU AddIn entry
 $addinPath = "HKCU:\SOFTWARE\Microsoft\Office\OneNote\AddIns\OneInk.AddIn"
 New-Item -Path $addinPath -Force
 Set-ItemProperty -Path $addinPath -Name LoadBehavior -Value 3 -Type DWord
+Set-ItemProperty -Path $addinPath -Name FriendlyName -Value "OneInk"
+Set-ItemProperty -Path $addinPath -Name Description -Value "OneInk - OneNote Ink Operations COM AddIn"
+Set-ItemProperty -Path $addinPath -Name CommandLineSafe -Value 1 -Type DWord
 ```
 
 **注意**：HKLM 注册不会被 HKCU 覆盖。如果之前用 admin 注册过 HKLM，再次用 HKCU 注册不会生效，因为 COM 会优先查找 HKLM。
@@ -229,5 +238,59 @@ for (int i = 1; i < numPoints - 1; i++)
     double t = (targetDist - cumLen[ptr]) / (cumLen[ptr + 1] - cumLen[ptr]);
     result.Add(Interpolate(pts[ptr], pts[ptr + 1], t));
 }
+```
+
+## 9. OneNote COM AddIn 注册失败排查
+
+### 关键发现：InprocServer32 缺少 Assembly 和 RuntimeVersion
+
+仅设置 `CodeBase` 是不够的，.NET CLR 需要 `Assembly` 和 `RuntimeVersion` 来定位和激活 .NET COM 对象。
+
+**必需的 InprocServer32 条目：**
+```
+(Default)         = mscoree.dll
+ThreadingModel    = Both
+Class             = YourAddIn.AddIn          ; ProgId 类名
+Assembly          = YourAddIn, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null
+RuntimeVersion    = v4.0.30319              ; 必须与编译目标 .NET 版本匹配
+CodeBase          = file:///C:/Program Files/YourAddIn/YourAddIn.DLL
+```
+
+### regasm 必须加 /tlb 参数
+
+不带 `/tlb` 参数时，regasm 不会生成类型库，导致 `New-Object -ComObject` 失败：
+
+```powershell
+# ❌ 错误：缺少 /tlb
+& $regasm /codebase "$dllPath"
+
+# ✅ 正确：/codebase + /tlb
+& $regasm /codebase /tlb "$dllPath"
+```
+
+### CommandLineSafe 必须设为 1
+
+Office COM AddIn 加载时检查此值，如果未设置或为 0，加载可能被拒绝：
+
+```powershell
+Set-ItemProperty -Path $addinPath -Name CommandLineSafe -Value 1 -Type DWord
+```
+
+### LoadBehavior=2 表示加载失败
+
+注册后 `LoadBehavior` 变成 2（已连接但未加载），说明 OneNote 尝试创建 COM 对象但失败了。常见原因：
+
+1. DLL 架构与 Office 不匹配（x64 Office 需要 x64 DLL）
+2. InprocServer32 缺少 Assembly/RuntimeVersion
+3. 缺少 CommandLineSafe
+4. DLL 依赖缺失
+
+### 验证 COM 对象是否注册成功
+
+```powershell
+# 测试 COM 对象创建（需要 /tlb 参数）
+$com = New-Object -ComObject "YourAddIn.AddIn"
+
+# 如果成功，会返回对象；如果失败，提示 CLASSNOTREG
 ```
 
