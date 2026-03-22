@@ -163,8 +163,8 @@ namespace OneInk
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
 
-                // Step 1: Get selection metadata (has selected="all" on selected InkDrawings)
-                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryDataSelection);
+                // Step 1: Get selection info using piSelection (fast ~20ms)
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piSelection);
 
                 var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
                 XDocument docSel;
@@ -172,48 +172,42 @@ namespace OneInk
                     docSel = XDocument.Load(reader);
                 XNamespace ns = docSel.Root.Name.Namespace;
 
-                var selInkElements = docSel.Descendants(ns + "InkDrawing").ToList();
+                // Get selected ink object IDs (marked with selected="all")
                 var selectedObjectIds = new HashSet<string>(
-                    selInkElements.Where(e => e.Attribute("selected")?.Value == "all")
-                                  .Select(e => e.Attribute("objectID")?.Value ?? "")
-                                  .Where(id => !string.IsNullOrEmpty(id))
+                    docSel.Descendants(ns + "InkDrawing")
+                          .Where(e => e.Attribute("selected")?.Value == "all")
+                          .Select(e => e.Attribute("objectID")?.Value ?? "")
+                          .Where(id => !string.IsNullOrEmpty(id))
                 );
                 bool hasSelection = selectedObjectIds.Count > 0;
 
-                // Step 2: Get full page with ISF data for deletion
-                OneNoteApplication.GetPageContent(pageId, out string xml, Microsoft.Office.Interop.OneNote.PageInfo.piBinaryData);
+                // Step 2: Get all ink object IDs using piBasic (fast ~20ms, no binary data)
+                OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
 
-                if (string.IsNullOrEmpty(xml))
-                {
-                    MessageBox.Show(Strings.RetrieveFailed);
-                    return;
-                }
+                XDocument docBasic;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
+                    docBasic = XDocument.Load(reader);
 
-                var settings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
-                XDocument doc;
-                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xml), settings))
-                    doc = XDocument.Load(reader);
+                var allInkIds = docBasic.Descendants(ns + "InkDrawing")
+                                   .Select(e => e.Attribute("objectID")?.Value ?? "")
+                                   .Where(id => !string.IsNullOrEmpty(id))
+                                   .ToList();
 
-                var inkElements = doc.Descendants(ns + "InkDrawing").ToList();
-
-                if (inkElements.Count == 0)
+                if (allInkIds.Count == 0)
                 {
                     MessageBox.Show(Strings.NoInkStrokes);
                     return;
                 }
 
+                // Step 3: Delete ink by objectId (DeletePageContent is fast)
                 int deletedCount = 0;
-                foreach (var ink in inkElements)
+                foreach (var objectId in allInkIds)
                 {
-                    string objectId = ink.Attribute("objectID")?.Value ?? "";
                     if (hasSelection && !selectedObjectIds.Contains(objectId))
                         continue;
 
-                    if (!string.IsNullOrEmpty(objectId))
-                    {
-                        OneNoteApplication.DeletePageContent(pageId, objectId);
-                        deletedCount++;
-                    }
+                    OneNoteApplication.DeletePageContent(pageId, objectId);
+                    deletedCount++;
                 }
 
                 if (deletedCount == 0)
