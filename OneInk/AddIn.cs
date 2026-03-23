@@ -400,31 +400,42 @@ namespace OneInk
                     ? allInkElements.Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? "")).ToList()
                     : allInkElements;
 
-                // Step 3: Get binary data for each ink and extract color
+                // Step 3: Get binary data for each ink in parallel
+                var objectIds = inksToCheck
+                    .Select(e => e.Attribute("objectID")?.Value ?? "")
+                    .Where(id => !string.IsNullOrEmpty(id))
+                    .ToList();
+
+                var parallelResults = new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+                System.Threading.Tasks.Parallel.ForEach(objectIds,
+                    new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = 8 },
+                    objectId =>
+                {
+                    var app = (Application)Activator.CreateInstance(System.Type.GetTypeFromProgID("OneNote.Application"));
+                    app.GetBinaryPageContent(pageId, objectId, out string isfBase64);
+                    if (!string.IsNullOrEmpty(isfBase64))
+                    {
+                        var isfColors = InkColorExtractor.ExtractInkColors(isfBase64);
+                        string color = isfColors.Count > 0 ? isfColors[0] : "#000000";
+                        parallelResults[objectId] = color;
+                    }
+                    System.Runtime.InteropServices.Marshal.ReleaseComObject(app);
+                });
+
                 var colorCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 var colorObjectIds = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var ink in inksToCheck)
+                foreach (var kvp in parallelResults)
                 {
-                    string objectId = ink.Attribute("objectID")?.Value ?? "";
-                    if (string.IsNullOrEmpty(objectId))
-                        continue;
-
-                    // Get binary data using GetBinaryPageContent
-                    OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
-                    if (string.IsNullOrEmpty(isfBase64))
-                        continue;
-
-                    var isfColors = InkColorExtractor.ExtractInkColors(isfBase64);
-                    string color = isfColors.Count > 0 ? isfColors[0] : "#000000";
-
+                    string color = kvp.Value;
                     if (!colorCounts.ContainsKey(color))
                     {
                         colorCounts[color] = 0;
                         colorObjectIds[color] = new List<string>();
                     }
                     colorCounts[color]++;
-                    colorObjectIds[color].Add(objectId);
+                    colorObjectIds[color].Add(kvp.Key);
                 }
 
                 if (colorCounts.Count == 0)
