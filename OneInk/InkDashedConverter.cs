@@ -15,15 +15,17 @@ namespace OneInk
 {
     public static class InkDashedConverter
     {
-        public static float DefaultDashFraction { get; set; } = 0.05f;
-        public static float DefaultGapFraction { get; set; } = 0.05f;
+        // Fixed dash/gap sizes in ink units (HIMETRIC: 1 unit = 0.001 inch)
+        public const int DenseDashGap = 120;
+        public const int MediumDashGap = 250;
+        public const int SparseDashGap = 500;
 
         public static string ConvertToDashed(string base64Data)
         {
-            return ConvertToDashed(base64Data, DefaultDashFraction, DefaultGapFraction);
+            return ConvertToDashed(base64Data, MediumDashGap);
         }
 
-        public static string ConvertToDashed(string base64Data, float dashFraction, float gapFraction)
+        public static string ConvertToDashed(string base64Data, int dashGapSize)
         {
             if (string.IsNullOrEmpty(base64Data))
                 return null;
@@ -40,7 +42,7 @@ namespace OneInk
 
             try
             {
-                var result = ConvertToDashedCore(raw, dashFraction, gapFraction);
+                var result = ConvertToDashedCore(raw, dashGapSize);
                 if (result != null)
                     return Convert.ToBase64String(result);
                 return null;
@@ -51,7 +53,7 @@ namespace OneInk
             }
         }
 
-        private static byte[] ConvertToDashedCore(byte[] isfData, float dashFraction, float gapFraction)
+        private static byte[] ConvertToDashedCore(byte[] isfData, int dashGapSize)
         {
             byte[] data = isfData;
 
@@ -109,7 +111,7 @@ namespace OneInk
             var dstInk = new Ink();
             foreach (var sg in strokesData)
             {
-                CreateDashedStroke(dstInk, sg, dashFraction, gapFraction);
+                CreateDashedStroke(dstInk, sg, dashGapSize);
             }
 
             byte[] result = dstInk.Save();
@@ -137,7 +139,7 @@ namespace OneInk
         private static StrokeGeometry ExtractStrokeGeometry(Stroke stroke)
         {
             var sg = new StrokeGeometry();
-            sg.Points = ResampleStroke(stroke.GetFlattenedBezierPoints(), 200);
+            sg.Points = ResampleStroke(stroke.GetFlattenedBezierPoints(), 500);
             sg.Attr = stroke.DrawingAttributes.Clone();
             return sg;
         }
@@ -189,7 +191,7 @@ namespace OneInk
         }
 
         private static void CreateDashedStroke(Ink ink, StrokeGeometry sg,
-            float dashFraction, float gapFraction)
+            int dashGapSize)
         {
             var pts = sg.Points;
             if (pts.Count < 2)
@@ -220,8 +222,21 @@ namespace OneInk
                 return;
             }
 
-            double dashLen = Math.Max(totalLen * dashFraction, 1.0);
-            double gapLen = Math.Max(totalLen * gapFraction, 1.0);
+            // If stroke is too short for the dash gap, skip dash conversion
+            if (totalLen < dashGapSize * 1.5)
+            {
+                try
+                {
+                    var s = ink.CreateStroke(pts.ToArray());
+                    s.DrawingAttributes = sg.Attr;
+                    s.DrawingAttributes.FitToCurve = true;
+                }
+                catch { }
+                return;
+            }
+
+            double dashLen = dashGapSize;
+            double gapLen = dashGapSize;
 
             bool inDash = true;
             double pos = 0;

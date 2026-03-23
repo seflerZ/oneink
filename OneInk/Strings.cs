@@ -29,6 +29,7 @@ namespace OneInk
         internal static string RetrieveFailed => IsChinese ? "无法获取页面内容。" : "Could not retrieve page content.";
         internal static string NoInkStrokes => IsChinese ? "当前页面没有墨迹。" : "No ink strokes found on the current page.";
         internal static string NoInkStrokesInSelection => IsChinese ? "所选区域内没有墨迹。" : "No ink strokes found in the selected area.";
+        internal static string NoSelectionForDashed => IsChinese ? "请先选择要转换的墨迹（套索工具框选）" : "Please select ink strokes to convert (use lasso to select).";
         internal static string ErrorClear => IsChinese ? "清除墨迹时出错：{0}" : "Error clearing ink: {0}";
         internal static string ErrorDelete => IsChinese ? "按颜色删除墨迹时出错：{0}" : "Error deleting ink by color: {0}";
         internal static string ErrorDashed => IsChinese ? "转换为虚线墨迹时出错：{0}" : "Error converting to dashed ink: {0}";

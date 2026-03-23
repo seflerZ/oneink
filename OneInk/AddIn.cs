@@ -236,13 +236,13 @@ namespace OneInk
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
 
-                // Get spacing from ribbon dropdown selection
-                float dashFraction;
+                // Get spacing from ribbon dropdown selection (fixed size in ink units)
+                int dashGapSize;
                 switch (_selectedDensityIndex)
                 {
-                    case 0: dashFraction = 0.025f; break;
-                    case 2: dashFraction = 0.10f; break;
-                    default: dashFraction = 0.05f; break;
+                    case 0: dashGapSize = InkDashedConverter.DenseDashGap; break;
+                    case 2: dashGapSize = InkDashedConverter.SparseDashGap; break;
+                    default: dashGapSize = InkDashedConverter.MediumDashGap; break;
                 }
 
                 // Step 1: Get selection info using piSelection (fast ~20ms)
@@ -264,7 +264,16 @@ namespace OneInk
 
                 if (selectedObjectIds.Count == 0)
                 {
-                    MessageBox.Show("请先选择要转换的墨迹（套索工具框选）");
+                    try
+                    {
+                        var window = OneNoteApplication.Windows.CurrentWindow;
+                        var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                        MessageBox.Show(new OneNoteWindowOwner(hwnd), Strings.NoSelectionForDashed);
+                    }
+                    catch
+                    {
+                        MessageBox.Show(Strings.NoSelectionForDashed);
+                    }
                     return;
                 }
 
@@ -298,7 +307,7 @@ namespace OneInk
                         continue;
 
                     // Convert to dashed
-                    string dashedBase64 = InkDashedConverter.ConvertToDashed(isfBase64, dashFraction, dashFraction);
+                    string dashedBase64 = InkDashedConverter.ConvertToDashed(isfBase64, dashGapSize);
                     if (string.IsNullOrEmpty(dashedBase64))
                         continue;
 
@@ -389,10 +398,24 @@ namespace OneInk
                     return;
                 }
 
+                // Must have selection
+                if (!hasSelection)
+                {
+                    try
+                    {
+                        var window = OneNoteApplication.Windows.CurrentWindow;
+                        var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                        MessageBox.Show(new OneNoteWindowOwner(hwnd), Strings.NoSelectionForDashed);
+                    }
+                    catch
+                    {
+                        MessageBox.Show(Strings.NoSelectionForDashed);
+                    }
+                    return;
+                }
+
                 // Determine which inks to check
-                var inksToCheck = hasSelection
-                    ? allInkElements.Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? "")).ToList()
-                    : allInkElements;
+                var inksToCheck = allInkElements.Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? "")).ToList();
 
                 // Step 3: Get binary data for each ink in parallel
                 var objectIds = inksToCheck
