@@ -232,10 +232,6 @@ namespace OneInk
 
         private void ExecuteToDashed()
         {
-            var sw = new System.Diagnostics.Stopwatch();
-            sw.Start();
-            Log($"[ToDashed] ===== START =====");
-
             try
             {
                 if (OneNoteApplication == null)
@@ -245,7 +241,6 @@ namespace OneInk
                 }
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
-                Log($"[ToDashed] pageId={pageId}");
 
                 // Get spacing from ribbon dropdown selection
                 float dashFraction;
@@ -257,9 +252,7 @@ namespace OneInk
                 }
 
                 // Step 1: Get selection info using piSelection (fast ~20ms)
-                sw.Restart();
                 OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piSelection);
-                Log($"[ToDashed] GetPageContent(piSelection): {sw.ElapsedMilliseconds}ms");
 
                 var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
                 XDocument docSel;
@@ -274,7 +267,6 @@ namespace OneInk
                           .Select(e => e.Attribute("objectID")?.Value ?? "")
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
-                Log($"[ToDashed] Selected objectIds: {selectedObjectIds.Count}");
 
                 if (selectedObjectIds.Count == 0)
                 {
@@ -283,9 +275,7 @@ namespace OneInk
                 }
 
                 // Step 2: Get page structure using piBasic (fast ~20ms)
-                sw.Restart();
                 OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
-                Log($"[ToDashed] GetPageContent(piBasic): {sw.ElapsedMilliseconds}ms");
 
                 XDocument docBasic;
                 using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
@@ -295,10 +285,8 @@ namespace OneInk
                 var selectedInkElements = docBasic.Descendants(ns + "InkDrawing")
                     .Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? ""))
                     .ToList();
-                Log($"[ToDashed] Found {selectedInkElements.Count} selected InkDrawings in piBasic");
 
                 // Step 3: For each selected ink, get binary data and convert
-                sw.Restart();
                 int convertedCount = 0;
                 var inkXmlParts = new List<XElement>();
 
@@ -313,18 +301,12 @@ namespace OneInk
                     // Get binary data for this specific ink using GetBinaryPageContent
                     OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
                     if (string.IsNullOrEmpty(isfBase64))
-                    {
-                        Log($"[ToDashed] GetBinaryPageContent returned empty for {objectId.Substring(0, 20)}...");
                         continue;
-                    }
 
                     // Convert to dashed
                     string dashedBase64 = InkDashedConverter.ConvertToDashed(isfBase64, dashFraction, dashFraction);
                     if (string.IsNullOrEmpty(dashedBase64))
-                    {
-                        Log($"[ToDashed] ConvertToDashed returned empty for {objectId.Substring(0, 20)}...");
                         continue;
-                    }
 
                     // Build ink XML element with Position, Size, and new Data
                     var inkXmlEl = new XElement(ns + "InkDrawing",
@@ -336,9 +318,7 @@ namespace OneInk
                     );
                     inkXmlParts.Add(inkXmlEl);
                     convertedCount++;
-                    Log($"[ToDashed] Converted {objectId.Substring(0, 20)}...");
                 }
-                Log($"[ToDashed] Conversion: {sw.ElapsedMilliseconds}ms, converted={convertedCount}");
 
                 if (convertedCount == 0)
                 {
@@ -347,9 +327,6 @@ namespace OneInk
                 }
 
                 // Step 4: Update page with partial XML (just the modified ink elements)
-                sw.Restart();
-
-                // Build page XML with proper namespace using XDocument
                 var pageEl = new XElement(ns + "Page",
                     new XAttribute("ID", pageId)
                 );
@@ -358,19 +335,7 @@ namespace OneInk
 
                 var pageDoc = new XDocument(pageEl);
                 string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
-                Log($"[ToDashed] pageXml length: {pageXml.Length}");
-
-                try
-                {
-                    OneNoteApplication.UpdatePageContent(pageXml);
-                    Log($"[ToDashed] UpdatePageContent: {sw.ElapsedMilliseconds}ms");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[ToDashed] UpdatePageContent FAILED: {ex.Message}");
-                    throw;
-                }
-                Log($"[ToDashed] ===== TOTAL: {sw.ElapsedMilliseconds}ms =====");
+                OneNoteApplication.UpdatePageContent(pageXml);
             }
             catch (Exception ex)
             {
@@ -388,9 +353,6 @@ namespace OneInk
         /// <param name="control">The ribbon control that triggered the action.</param>
         public void SelectInkColorButtonClicked(IRibbonControl control)
         {
-            var sw = new System.Diagnostics.Stopwatch();
-            sw.Start();
-
             try
             {
                 if (OneNoteApplication == null)
@@ -400,14 +362,11 @@ namespace OneInk
                 }
 
                 string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
-                Log($"[ColorDelete] pageId={pageId}");
 
                 var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
 
                 // Step 1: Get selection info using piSelection (fast ~20ms)
-                sw.Restart();
                 OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piSelection);
-                Log($"[ColorDelete] GetPageContent(piSelection): {sw.ElapsedMilliseconds}ms");
 
                 XDocument docSel;
                 using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
@@ -421,12 +380,9 @@ namespace OneInk
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
                 bool hasSelection = selectedObjectIds.Count > 0;
-                Log($"[ColorDelete] Selected objectIds: {selectedObjectIds.Count}");
 
                 // Step 2: Get page structure using piBasic (fast ~20ms)
-                sw.Restart();
                 OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
-                Log($"[ColorDelete] GetPageContent(piBasic): {sw.ElapsedMilliseconds}ms");
 
                 XDocument docBasic;
                 using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
@@ -443,10 +399,8 @@ namespace OneInk
                 var inksToCheck = hasSelection
                     ? allInkElements.Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? "")).ToList()
                     : allInkElements;
-                Log($"[ColorDelete] Inks to check: {inksToCheck.Count}");
 
                 // Step 3: Get binary data for each ink and extract color
-                sw.Restart();
                 var colorCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
                 var colorObjectIds = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
@@ -472,7 +426,6 @@ namespace OneInk
                     colorCounts[color]++;
                     colorObjectIds[color].Add(objectId);
                 }
-                Log($"[ColorDelete] Color extraction: {sw.ElapsedMilliseconds}ms, colors found: {colorCounts.Count}");
 
                 if (colorCounts.Count == 0)
                 {
