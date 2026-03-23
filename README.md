@@ -8,7 +8,10 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 - **Delete Ink by Color**: Select a color and delete strokes of that color — if ink is selected (lasso), only selected ink colors are shown and deleted
 - **To Dashed Lines**: Convert ink strokes to dashed/dotted lines — supports three density presets (dense, medium, sparse); if ink is selected (lasso), only selected ink is converted
 
-## Requirements
+## Installing the release pacakge
+Just unzip the release file and execute the install.ps1 script as Administrator.
+
+## Requirements for Development
 
 - Windows 10/11
 - Microsoft OneNote (Office 2016 or later, **x64**)
