@@ -92,9 +92,14 @@ if ($Mode -eq "Production") {
 } else {
     # ===================== Dev =====================
     # Build output dir: OneInk\bin\x64\Release\
+    Write-Host "[1/3] Building OneInk..." -ForegroundColor Yellow
+    & $Global:MSBuildPath $Global:ProjectFile /p:Configuration=Release /p:Platform=$Platform /t:Rebuild /v:m | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] Build failed" -ForegroundColor Red; exit 1 }
+    Write-Host "[OK] Build completed" -ForegroundColor Green
+
     $BuildDir = Join-Path (Split-Path $Global:ProjectFile) "bin\$Platform\Release"
 
-    Write-Host "[1/2] Registering from build dir: $BuildDir" -ForegroundColor Yellow
+    Write-Host "[2/3] Registering from build dir: $BuildDir" -ForegroundColor Yellow
 
     # Clean HKLM CLSID/AppID (best effort - may need admin)
     $hklmClsId = "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
@@ -125,12 +130,12 @@ if ($Mode -eq "Production") {
     Set-ItemProperty -Path $addinRegPath -Name LoadBehavior -Value 3 -Type DWord
     Write-Host "[OK]" -ForegroundColor Green
 
-    Write-Host "[2/2] Verification..." -ForegroundColor Yellow
+    Write-Host "[3/3] Verification..." -ForegroundColor Yellow
     $hkcuCodeBase = (Get-ItemProperty "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID\InprocServer32" 'CodeBase' -EA SilentlyContinue).CodeBase
     $hkcuLB = (Get-ItemProperty $addinRegPath 'LoadBehavior' -EA SilentlyContinue).LoadBehavior
     Write-Host "  HKCU CodeBase : $hkcuCodeBase" -ForegroundColor $(if ($hkcuCodeBase -like "*\bin\$Platform\Release*") { "Green" } else { "Yellow" })
     Write-Host "  HKCU LoadBehavior: $hkcuLB" -ForegroundColor $(if ($hkcuLB -eq 3) { "Green" } else { "Red" })
-    Write-Host "[OK] Dev registration complete!" -ForegroundColor Green
+    Write-Host "[OK] Dev deployment complete!" -ForegroundColor Green
 }
 
 Write-Host

@@ -14,7 +14,7 @@ namespace OneInk
     {
         public string SelectedColor { get; private set; }
 
-        public ColorSelectionDialog(List<string> colors, string[] displayItems)
+        public ColorSelectionDialog(List<string> colors)
         {
             InitializeComponent();
 
@@ -27,17 +27,17 @@ namespace OneInk
                 try { c = ColorTranslator.FromHtml(colorHex); }
                 catch { c = Color.Black; }
 
-                var bmp = new Bitmap(16, 16);
+                var bmp = new Bitmap(48, 48);
                 using (var g = Graphics.FromImage(bmp))
                 {
                     using (var brush = new SolidBrush(c))
-                        g.FillRectangle(brush, 0, 0, 16, 16);
+                        g.FillRectangle(brush, 0, 0, 48, 48);
                     using (var pen = new Pen(Color.FromArgb(128, 128, 128)))
-                        g.DrawRectangle(pen, 0, 0, 15, 15);
+                        g.DrawRectangle(pen, 0, 0, 47, 47);
                 }
 
                 colorImageList.Images.Add(bmp);
-                var item = new ListViewItem(displayItems[i], i) { Tag = colorHex };
+                var item = new ListViewItem(colorHex, i) { Tag = colorHex };
                 colorListView.Items.Add(item);
             }
         }

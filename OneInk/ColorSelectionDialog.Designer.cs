@@ -43,20 +43,20 @@ namespace OneInk
             // colorListView
             //
             this.colorListView.FullRowSelect = true;
-            this.colorListView.SmallImageList = this.colorImageList;
+            this.colorListView.LargeImageList = this.colorImageList;
             this.colorListView.Location = new System.Drawing.Point(12, 40);
             this.colorListView.MultiSelect = false;
             this.colorListView.Name = "colorListView";
-            this.colorListView.Size = new System.Drawing.Size(340, 200);
+            this.colorListView.Size = new System.Drawing.Size(340, 260);
             this.colorListView.TabIndex = 0;
             this.colorListView.UseCompatibleStateImageBehavior = false;
-            this.colorListView.View = System.Windows.Forms.View.List;
+            this.colorListView.View = System.Windows.Forms.View.LargeIcon;
             this.colorListView.SelectedIndexChanged += new System.EventHandler(this.colorListView_SelectedIndexChanged);
             this.colorListView.DoubleClick += new System.EventHandler(this.colorListView_DoubleClick);
             //
             // okButton
             //
-            this.okButton.Location = new System.Drawing.Point(12, 250);
+            this.okButton.Location = new System.Drawing.Point(12, 310);
             this.okButton.Name = "okButton";
             this.okButton.Size = new System.Drawing.Size(160, 28);
             this.okButton.TabIndex = 1;
@@ -67,7 +67,7 @@ namespace OneInk
             // cancelButton
             //
             this.cancelButton.DialogResult = System.Windows.Forms.DialogResult.Cancel;
-            this.cancelButton.Location = new System.Drawing.Point(192, 250);
+            this.cancelButton.Location = new System.Drawing.Point(192, 310);
             this.cancelButton.Name = "cancelButton";
             this.cancelButton.Size = new System.Drawing.Size(160, 28);
             this.cancelButton.TabIndex = 2;
@@ -77,7 +77,7 @@ namespace OneInk
             //
             // colorImageList
             //
-            this.colorImageList.ImageSize = new System.Drawing.Size(16, 16);
+            this.colorImageList.ImageSize = new System.Drawing.Size(48, 48);
             //
             // headerLabel
             //
@@ -94,7 +94,7 @@ namespace OneInk
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.CancelButton = this.cancelButton;
-            this.ClientSize = new System.Drawing.Size(364, 290);
+            this.ClientSize = new System.Drawing.Size(364, 350);
             this.Controls.Add(this.headerLabel);
             this.Controls.Add(this.cancelButton);
             this.Controls.Add(this.okButton);

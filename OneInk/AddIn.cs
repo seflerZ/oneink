@@ -433,12 +433,7 @@ namespace OneInk
                     return;
                 }
 
-                var items = colorCounts
-                    .OrderByDescending(kv => kv.Value)
-                    .Select(kv => $"{kv.Key} ({kv.Value} stroke{(kv.Value > 1 ? "s" : "")})")
-                    .ToArray();
-
-                using (var dialog = new ColorSelectionDialog(colorCounts.Keys.ToList(), items))
+                using (var dialog = new ColorSelectionDialog(colorCounts.Keys.OrderByDescending(c => c).ToList()))
                 {
                     try
                     {
