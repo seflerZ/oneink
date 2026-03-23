@@ -193,12 +193,6 @@ namespace OneInk
                                    .Where(id => !string.IsNullOrEmpty(id))
                                    .ToList();
 
-                if (allInkIds.Count == 0)
-                {
-                    MessageBox.Show(Strings.NoInkStrokes);
-                    return;
-                }
-
                 // Step 3: Delete ink by objectId (DeletePageContent is fast)
                 int deletedCount = 0;
                 foreach (var objectId in allInkIds)
