@@ -139,9 +139,74 @@ namespace OneInk
         private static StrokeGeometry ExtractStrokeGeometry(Stroke stroke)
         {
             var sg = new StrokeGeometry();
-            sg.Points = ResampleStroke(stroke.GetFlattenedBezierPoints(), 500);
+            var rawPts = GetStrokePoints(stroke);
+            // Shapes: few points, keep as-is. Normal strokes: resample to 500 points
+            int numPoints = rawPts.Count <= 20 ? rawPts.Count : 500;
+            sg.Points = numPoints == rawPts.Count
+                ? rawPts
+                : ResampleStroke(rawPts.ToArray(), numPoints);
             sg.Attr = stroke.DrawingAttributes.Clone();
             return sg;
+        }
+
+        private static List<Point> GetStrokePoints(Stroke stroke)
+        {
+            try
+            {
+                var points = stroke.GetPoints();
+                if (points != null && points.Length >= 2)
+                    return new List<Point>(points);
+            }
+            catch { }
+
+            return new List<Point>(stroke.GetFlattenedBezierPoints());
+        }
+
+        private static List<Point> InterpolatePoints(List<Point> pts, int targetCount)
+        {
+            // Linearly interpolate between points to create more points
+            // This preserves straight line segments (important for shapes)
+            if (pts.Count < 2 || targetCount <= pts.Count)
+                return pts;
+
+            var result = new List<Point>(targetCount);
+            result.Add(pts[0]);
+
+            // Calculate segment lengths
+            double[] segLen = new double[pts.Count - 1];
+            double totalLen = 0;
+            for (int i = 0; i < pts.Count - 1; i++)
+            {
+                double dx = pts[i + 1].X - pts[i].X;
+                double dy = pts[i + 1].Y - pts[i].Y;
+                segLen[i] = Math.Sqrt(dx * dx + dy * dy);
+                totalLen += segLen[i];
+            }
+
+            if (totalLen <= 0)
+                return pts;
+
+            // Interpolate points at equal distances
+            for (int i = 1; i < targetCount - 1; i++)
+            {
+                double targetDist = (totalLen * i) / (targetCount - 1);
+                double acc = 0;
+                for (int j = 0; j < pts.Count - 1; j++)
+                {
+                    if (acc + segLen[j] >= targetDist)
+                    {
+                        double t = segLen[j] > 0 ? (targetDist - acc) / segLen[j] : 0;
+                        int x = (int)Math.Round(pts[j].X + t * (pts[j + 1].X - pts[j].X));
+                        int y = (int)Math.Round(pts[j].Y + t * (pts[j + 1].Y - pts[j].Y));
+                        result.Add(new Point(x, y));
+                        break;
+                    }
+                    acc += segLen[j];
+                }
+            }
+
+            result.Add(pts[pts.Count - 1]);
+            return result;
         }
 
         private static List<Point> ResampleStroke(Point[] pts, int numPoints)
@@ -216,7 +281,6 @@ namespace OneInk
                 {
                     var s = ink.CreateStroke(pts.ToArray());
                     s.DrawingAttributes = sg.Attr;
-                    s.DrawingAttributes.FitToCurve = true;
                 }
                 catch { }
                 return;
@@ -229,10 +293,26 @@ namespace OneInk
                 {
                     var s = ink.CreateStroke(pts.ToArray());
                     s.DrawingAttributes = sg.Attr;
-                    s.DrawingAttributes.FitToCurve = true;
                 }
                 catch { }
                 return;
+            }
+
+            // Shapes (rectangles, ellipses) have few points, interpolate for dash conversion
+            if (pts.Count <= 20)
+            {
+                pts = InterpolatePoints(pts, 500);
+                // Recalculate cumulative lengths with new points
+                cumLen = new double[pts.Count];
+                cumLen[0] = 0;
+                totalLen = 0;
+                for (int i = 1; i < pts.Count; i++)
+                {
+                    double dx = pts[i].X - pts[i - 1].X;
+                    double dy = pts[i].Y - pts[i - 1].Y;
+                    totalLen += Math.Sqrt(dx * dx + dy * dy);
+                    cumLen[i] = totalLen;
+                }
             }
 
             double dashLen = dashGapSize;
@@ -258,7 +338,6 @@ namespace OneInk
                         {
                             var s = ink.CreateStroke(seg);
                             s.DrawingAttributes = sg.Attr;
-                            s.DrawingAttributes.FitToCurve = true;
                         }
                         catch { }
                     }
