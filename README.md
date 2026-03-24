@@ -12,7 +12,10 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
   - **Smooth Polyline (折线平滑)**: Ramer-Douglas-Peucker algorithm for simplified straight-line segments
   - If ink is selected (lasso), only selected ink is smoothed
 
-## Requirements
+## Installing the release pacakge
+Just unzip the release file and execute the install.ps1 script as Administrator.
+
+## Requirements for Development
 
 - Windows 10/11
 - Microsoft OneNote (Office 2016 or later, **x64**)
