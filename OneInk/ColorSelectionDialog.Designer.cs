@@ -45,12 +45,13 @@ namespace OneInk
             this.colorListView.FullRowSelect = true;
             this.colorListView.LargeImageList = this.colorImageList;
             this.colorListView.Location = new System.Drawing.Point(12, 40);
-            this.colorListView.MultiSelect = false;
+            this.colorListView.MultiSelect = true;
             this.colorListView.Name = "colorListView";
             this.colorListView.Size = new System.Drawing.Size(340, 260);
             this.colorListView.TabIndex = 0;
             this.colorListView.UseCompatibleStateImageBehavior = false;
             this.colorListView.View = System.Windows.Forms.View.LargeIcon;
+            this.colorListView.CheckBoxes = true;
             this.colorListView.SelectedIndexChanged += new System.EventHandler(this.colorListView_SelectedIndexChanged);
             this.colorListView.DoubleClick += new System.EventHandler(this.colorListView_DoubleClick);
             //

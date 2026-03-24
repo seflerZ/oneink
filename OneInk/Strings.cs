@@ -17,11 +17,11 @@ namespace OneInk
         // Dialog: Color Selection
         internal static string DialogTitle => IsChinese ? "选择墨迹颜色" : "Select Ink Color";
         internal static string DialogHeader => IsChinese
-            ? "选择一个颜色，删除该颜色的所有墨迹："
-            : "Select a color to delete all ink strokes of that color:";
-        internal static string OkButton => IsChinese ? "删除选中颜色" : "Delete Selected Color";
+            ? "勾选要删除的颜色（可多选）："
+            : "Check colors to delete (multi-select):";
+        internal static string OkButton => IsChinese ? "删除所选颜色" : "Delete Selected Colors";
         internal static string CancelButton => IsChinese ? "取消" : "Cancel";
-        internal static string NoSelection => IsChinese ? "请先选择一个颜色。" : "Please select a color first.";
+        internal static string NoSelection => IsChinese ? "请先选择至少一个颜色。" : "Please select at least one color.";
         internal static string NoSelectionTitle => IsChinese ? "未选择" : "No Selection";
 
         // MessageBox

@@ -5,8 +5,12 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
 ## Features
 
 - **Clear All Ink**: Remove ink strokes from the current page — if ink is selected (lasso), only selected ink is removed
-- **Delete Ink by Color**: Select a color and delete strokes of that color — if ink is selected (lasso), only selected ink colors are shown and deleted
+- **Delete Ink by Color**: Select colors (multi-select supported) and delete strokes of those colors — if ink is selected (lasso), only selected ink colors are shown and deleted
 - **To Dashed Lines**: Convert ink strokes to dashed/dotted lines — supports three density presets (dense, medium, sparse); if ink is selected (lasso), only selected ink is converted
+- **Smooth Ink**: Smooth hand-drawn strokes into cleaner lines — supports two modes:
+  - **Smooth Curve (曲线平滑)**: Chaikin's algorithm for flowing Bezier curves
+  - **Smooth Polyline (折线平滑)**: Ramer-Douglas-Peucker algorithm for simplified straight-line segments
+  - If ink is selected (lasso), only selected ink is smoothed
 
 ## Requirements
 
@@ -62,16 +66,24 @@ All paths are centralized in `config.ps1`. Edit this file if MSBuild or other to
 
 ## Usage
 
-After installation, open OneNote. A **OneInk** tab appears in the ribbon with three buttons:
+After installation, open OneNote. A **OneInk** tab appears in the ribbon with tools:
 
 - **Clear All Ink**: Removes ink strokes from the current page — if ink is selected (lasso selection), only selected ink is removed
-- **Delete by Color**: Opens a dialog listing detected ink colors on the page — if ink is selected (lasso selection), only selected ink colors are shown; select a color to delete matching strokes
+- **Delete by Color**: Opens a dialog listing detected ink colors on the page — if ink is selected (lasso selection), only selected ink colors are shown; check multiple colors to delete them all at once
 - **To Dashed Lines** (split button):
   - Main button label shows current density (e.g., `转为虚线（中等）`)
   - Click the dropdown arrow to select density: **密集** (dense), **中等** (medium), **稀疏** (sparse)
   - Each density has its own icon; clicking a menu item updates the button label and icon
   - Click the main button to convert ink with the selected density
   - If ink is selected (lasso selection), only selected ink is converted
+- **Smooth Ink** (split button):
+  - Main button label shows current mode (e.g., `平滑至（曲线）`)
+  - Click the dropdown arrow to select mode: **曲线** (curve smoothing) or **折线** (polyline simplification)
+  - Each mode has its own icon; clicking a menu item updates the button label and icon
+  - Click the main button to smooth ink with the selected mode
+  - Curve smoothing uses Chaikin's algorithm to create flowing Bezier curves
+  - Polyline smoothing uses Ramer-Douglas-Peucker algorithm to simplify strokes to straight segments
+  - If ink is selected (lasso selection), only selected ink is smoothed
 
 ## Project Structure
 
@@ -82,9 +94,9 @@ OneInk/
 │   ├── AddIn.cs            # COM AddIn entry point + ribbon callbacks
 │   ├── BitmapExtensions.cs # Bitmap → IStream extension
 │   ├── ReadOnlyStream.cs   # IStream COM wrapper
-│   ├── ColorSelectionDialog.cs # Ink color selection dialog
+│   ├── ColorSelectionDialog.cs # Ink color selection dialog (multi-select)
 │   ├── InkColorExtractor.cs  # ISF color extraction via Microsoft.Ink
-│   ├── InkDashedConverter.cs # Ink-to-dashed conversion via Microsoft.Ink
+│   ├── InkDashedConverter.cs # Ink conversion: dashed lines + smoothing via Microsoft.Ink
 │   ├── Strings.cs           # i18n (Chinese/English)
 │   ├── Resources/           # Ribbon icons
 │   └── Properties/
@@ -106,6 +118,8 @@ OneInk/
 - Ink operations work with OneNote's XML page format and ISF (Ink Serialized Format) via `Microsoft.Ink`
 - `splitButton` is used for combined button + menu UI; menu items use `onAction` callbacks
 - Ribbon `dropDown` `onAction` is known to not fire reliably in OneNote — use separate `button` elements or `splitButton` with `menu` instead
+- **Smooth Curve**: Chaikin's corner-cutting algorithm (3 iterations) produces C^1 continuous smooth curves
+- **Smooth Polyline**: Ramer-Douglas-Peucker algorithm (epsilon=500 HIMETRIC ≈ 12.7mm) simplifies strokes to straight segments
 
 ## License
 

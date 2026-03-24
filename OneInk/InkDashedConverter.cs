@@ -1,8 +1,9 @@
 /*
- *  InkDashedConverter - Converts ink strokes to dashed/dotted lines.
- *  Uses Microsoft.Ink.Ink to load ISF, extracts stroke geometry,
- *  modifies it by removing gap points, then creates new strokes
- *  using CreateStroke(Point[]) which produces standard ISF that OneNote accepts.
+ *  InkDashedConverter - Ink stroke manipulation via Microsoft.Ink API.
+ *  Supports:
+ *    - ConvertToDashed: Convert strokes to dashed/dotted lines
+ *    - SmoothStroke: Smooth strokes (curve or polyline)
+ *  Uses CreateStroke(Point[]) to produce standard ISF that OneNote accepts.
  */
 
 using System;
@@ -56,45 +57,9 @@ namespace OneInk
 
         private static byte[] ConvertToDashedCore(byte[] isfData, int dashGapSize)
         {
-            byte[] data = isfData;
-
-            // Try ZLIB decompression if the data appears compressed
-            if (isfData.Length > 0 && isfData[0] == 0x00 && isfData.Length > 4)
-            {
-                byte second = isfData[1];
-                if (second != 0x01)
-                {
-                    try { data = DecompressZlib(isfData); }
-                    catch { }
-                }
-            }
-
-            Ink srcInk = null;
-            try
-            {
-                srcInk = new Ink();
-                srcInk.Load(data);
-            }
-            catch
-            {
-                // Try stripping 0x00 prefix as fallback
-                if (isfData.Length > 0 && isfData[0] == 0x00)
-                {
-                    var stripped = new byte[isfData.Length - 1];
-                    Array.Copy(isfData, 1, stripped, 0, stripped.Length);
-                    try
-                    {
-                        srcInk = new Ink();
-                        srcInk.Load(stripped);
-                    }
-                    catch
-                    {
-                        if (srcInk != null) { srcInk.Dispose(); srcInk = null; }
-                    }
-                }
-                if (srcInk == null)
-                    return null;
-            }
+            Ink srcInk = LoadIsf(isfData, out _);
+            if (srcInk == null)
+                return null;
 
             if (srcInk.Strokes.Count == 0)
             {
@@ -131,6 +96,57 @@ namespace OneInk
             }
         }
 
+        /// <summary>
+        /// Load ISF data into an Ink object. Handles ZLIB compression and 0x00 prefix.
+        /// </summary>
+        private static Ink LoadIsf(byte[] isfData, out byte[] remaining)
+        {
+            remaining = isfData;
+            byte[] data = isfData;
+
+            // Try ZLIB decompression if the data appears compressed
+            if (isfData.Length > 0 && isfData[0] == 0x00 && isfData.Length > 4)
+            {
+                byte second = isfData[1];
+                if (second != 0x01)
+                {
+                    try { data = DecompressZlib(isfData); }
+                    catch { }
+                }
+            }
+
+            Ink ink = null;
+            try
+            {
+                ink = new Ink();
+                ink.Load(data);
+                remaining = data;
+                return ink;
+            }
+            catch
+            {
+                // Try stripping 0x00 prefix as fallback
+                if (isfData.Length > 0 && isfData[0] == 0x00)
+                {
+                    var stripped = new byte[isfData.Length - 1];
+                    Array.Copy(isfData, 1, stripped, 0, stripped.Length);
+                    try
+                    {
+                        ink = new Ink();
+                        ink.Load(stripped);
+                        remaining = stripped;
+                        return ink;
+                    }
+                    catch
+                    {
+                        if (ink != null) { ink.Dispose(); ink = null; }
+                    }
+                }
+            }
+            remaining = data;
+            return ink;
+        }
+
         public static string SmoothStroke(string base64Data, bool curveSmoothing)
         {
             if (string.IsNullOrEmpty(base64Data))
@@ -161,45 +177,9 @@ namespace OneInk
 
         private static byte[] SmoothStrokeCore(byte[] isfData, bool curveSmoothing)
         {
-            byte[] data = isfData;
-
-            // Try ZLIB decompression if the data appears compressed
-            if (isfData.Length > 0 && isfData[0] == 0x00 && isfData.Length > 4)
-            {
-                byte second = isfData[1];
-                if (second != 0x01)
-                {
-                    try { data = DecompressZlib(isfData); }
-                    catch { }
-                }
-            }
-
-            Ink srcInk = null;
-            try
-            {
-                srcInk = new Ink();
-                srcInk.Load(data);
-            }
-            catch
-            {
-                // Try stripping 0x00 prefix as fallback
-                if (isfData.Length > 0 && isfData[0] == 0x00)
-                {
-                    var stripped = new byte[isfData.Length - 1];
-                    Array.Copy(isfData, 1, stripped, 0, stripped.Length);
-                    try
-                    {
-                        srcInk = new Ink();
-                        srcInk.Load(stripped);
-                    }
-                    catch
-                    {
-                        if (srcInk != null) { srcInk.Dispose(); srcInk = null; }
-                    }
-                }
-                if (srcInk == null)
-                    return null;
-            }
+            Ink srcInk = LoadIsf(isfData, out _);
+            if (srcInk == null)
+                return null;
 
             if (srcInk.Strokes.Count == 0)
             {
@@ -230,16 +210,19 @@ namespace OneInk
             var sg = new StrokeGeometry();
             var rawPts = GetStrokePoints(stroke);
 
+            // Resample by fixed distance interval (2000 HIMETRIC ≈ 2mm)
+            var resampledPts = ResampleByDistance(rawPts, 2000);
+
             List<Point> smoothedPts;
             if (curveSmoothing)
             {
                 // Chaikin's algorithm for curve smoothing
-                smoothedPts = ChaikinsSmooth(rawPts, 3);
+                smoothedPts = ChaikinsSmooth(resampledPts, 1);
             }
             else
             {
                 // Ramer-Douglas-Peucker for polyline simplification
-                smoothedPts = RDPSimplify(rawPts, 500); // epsilon = 500 HIMETRIC units (~12.7mm)
+                smoothedPts = RDPSimplify(resampledPts, 500); // epsilon = 500 HIMETRIC units (~12.7mm)
             }
 
             sg.Points = smoothedPts;
@@ -247,40 +230,94 @@ namespace OneInk
             return sg;
         }
 
-        private static List<Point> ChaikinsSmooth(List<Point> pts, int iterations)
+        private static List<Point> ResampleByDistance(List<Point> pts, int interval)
         {
             if (pts == null || pts.Count < 2)
                 return pts;
 
-            var result = new List<Point>(pts);
+            // Estimate result size to reduce allocations
+            double totalLen = 0;
+            for (int i = 1; i < pts.Count; i++)
+            {
+                double dx = pts[i].X - pts[i - 1].X;
+                double dy = pts[i].Y - pts[i - 1].Y;
+                totalLen += Math.Sqrt(dx * dx + dy * dy);
+            }
+            int estimatedCount = Math.Max(2, (int)(totalLen / interval) + 2);
+
+            var result = new List<Point>(estimatedCount);
+            result.Add(pts[0]);
+
+            double accumDist = 0;
+            Point lastPt = pts[0];
+
+            for (int i = 1; i < pts.Count; i++)
+            {
+                double dx = pts[i].X - lastPt.X;
+                double dy = pts[i].Y - lastPt.Y;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
+                accumDist += dist;
+
+                while (accumDist >= interval)
+                {
+                    double t = (accumDist - interval) / dist;
+                    int x = (int)Math.Round(pts[i].X - t * (pts[i].X - lastPt.X));
+                    int y = (int)Math.Round(pts[i].Y - t * (pts[i].Y - lastPt.Y));
+                    result.Add(new Point(x, y));
+
+                    accumDist -= interval;
+                }
+
+                lastPt = pts[i];
+            }
+
+            // Always include the last point
+            if (result.Count == 0 || result[result.Count - 1] != pts[pts.Count - 1])
+                result.Add(pts[pts.Count - 1]);
+
+            return result;
+        }
+
+        private static List<Point> ChaikinsSmooth(List<Point> pts, int iterations)
+        {
+            if (pts == null || pts.Count < 2 || iterations <= 0)
+                return pts;
+
+            // Pre-allocate array for smooth result (each iteration doubles points - 1)
+            int n = pts.Count;
+            Point[] result = pts.ToArray();
+            Point[] buffer = new Point[n * 2];
 
             for (int iter = 0; iter < iterations; iter++)
             {
-                var newPts = new List<Point>();
-                newPts.Add(result[0]);
+                int j = 0;
+                buffer[j++] = result[0];
 
-                for (int i = 0; i < result.Count - 1; i++)
+                for (int i = 0; i < n - 1; i++)
                 {
-                    var p0 = result[i];
-                    var p1 = result[i + 1];
+                    int p0x = result[i].X, p0y = result[i].Y;
+                    int p1x = result[i + 1].X, p1y = result[i + 1].Y;
 
                     // Q = 3/4 * P0 + 1/4 * P1
-                    int qx = (3 * p0.X + p1.X) / 4;
-                    int qy = (3 * p0.Y + p1.Y) / 4;
-
+                    buffer[j++] = new Point((3 * p0x + p1x) / 4, (3 * p0y + p1y) / 4);
                     // R = 1/4 * P0 + 3/4 * P1
-                    int rx = (p0.X + 3 * p1.X) / 4;
-                    int ry = (p0.Y + 3 * p1.Y) / 4;
-
-                    newPts.Add(new Point(qx, qy));
-                    newPts.Add(new Point(rx, ry));
+                    buffer[j++] = new Point((p0x + 3 * p1x) / 4, (p0y + 3 * p1y) / 4);
                 }
 
-                newPts.Add(result[result.Count - 1]);
-                result = newPts;
+                buffer[j++] = result[n - 1];
+
+                // Swap buffers
+                n = j;
+                var temp = result;
+                result = buffer;
+                buffer = temp;
             }
 
-            return result;
+            // Copy result to a new list of correct size
+            var final = new List<Point>(n);
+            for (int i = 0; i < n; i++)
+                final.Add(result[i]);
+            return final;
         }
 
         private static List<Point> RDPSimplify(List<Point> pts, double epsilon)
@@ -288,44 +325,53 @@ namespace OneInk
             if (pts == null || pts.Count < 3)
                 return pts;
 
-            // Direct RDP simplification - preserves overall shape, removes noise
-            return RDPSegment(pts, epsilon);
-        }
+            // Iterative RDP with stack to avoid recursion overhead
+            var keepFlags = new bool[pts.Count];
+            keepFlags[0] = true;
+            keepFlags[pts.Count - 1] = true;
 
-        private static List<Point> RDPSegment(List<Point> pts, double epsilon)
-        {
-            if (pts == null || pts.Count < 3)
-                return pts;
+            var stack = new Stack<(int start, int end)>();
+            stack.Push((0, pts.Count - 1));
 
-            double maxDist = 0;
-            int maxIndex = 0;
-
-            var first = pts[0];
-            var last = pts[pts.Count - 1];
-
-            for (int i = 1; i < pts.Count - 1; i++)
+            while (stack.Count > 0)
             {
-                double dist = PerpendicularDistance(pts[i], first, last);
-                if (dist > maxDist)
+                var (start, end) = stack.Pop();
+                if (end - start < 2)
+                    continue;
+
+                double maxDist = 0;
+                int maxIndex = start;
+
+                var first = pts[start];
+                var last = pts[end];
+
+                for (int i = start + 1; i < end; i++)
                 {
-                    maxDist = dist;
-                    maxIndex = i;
+                    double dist = PerpendicularDistance(pts[i], first, last);
+                    if (dist > maxDist)
+                    {
+                        maxDist = dist;
+                        maxIndex = i;
+                    }
+                }
+
+                if (maxDist > epsilon)
+                {
+                    keepFlags[maxIndex] = true;
+                    stack.Push((start, maxIndex));
+                    stack.Push((maxIndex, end));
                 }
             }
 
-            if (maxDist > epsilon)
+            // Build result from kept points
+            var result = new List<Point>(pts.Count);
+            for (int i = 0; i < pts.Count; i++)
             {
-                var left = RDPSegment(pts.GetRange(0, maxIndex + 1), epsilon);
-                var right = RDPSegment(pts.GetRange(maxIndex, pts.Count - maxIndex), epsilon);
+                if (keepFlags[i])
+                    result.Add(pts[i]);
+            }
 
-                var result = new List<Point>(left);
-                result.AddRange(right.GetRange(1, right.Count - 1));
-                return result;
-            }
-            else
-            {
-                return new List<Point> { first, last };
-            }
+            return result;
         }
 
         private static double PerpendicularDistance(Point pt, Point lineStart, Point lineEnd)

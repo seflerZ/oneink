@@ -12,7 +12,7 @@ namespace OneInk
 {
     public partial class ColorSelectionDialog : Form
     {
-        public string SelectedColor { get; private set; }
+        public List<string> SelectedColors { get; private set; } = new List<string>();
 
         public ColorSelectionDialog(List<string> colors)
         {
@@ -44,13 +44,21 @@ namespace OneInk
 
         private void okButton_Click(object sender, EventArgs e)
         {
-            if (colorListView.SelectedItems.Count == 0)
+            SelectedColors.Clear();
+            foreach (ListViewItem item in colorListView.Items)
+            {
+                if (item.Checked)
+                {
+                    SelectedColors.Add(item.Tag as string);
+                }
+            }
+
+            if (SelectedColors.Count == 0)
             {
                 MessageBox.Show(Strings.NoSelection, Strings.NoSelectionTitle,
                     MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            SelectedColor = colorListView.SelectedItems[0].Tag as string;
             DialogResult = DialogResult.OK;
             Close();
         }
@@ -63,18 +71,10 @@ namespace OneInk
 
         private void colorListView_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (colorListView.SelectedItems.Count > 0)
-                SelectedColor = colorListView.SelectedItems[0].Tag as string;
         }
 
         private void colorListView_DoubleClick(object sender, EventArgs e)
         {
-            if (colorListView.SelectedItems.Count > 0)
-            {
-                SelectedColor = colorListView.SelectedItems[0].Tag as string;
-                DialogResult = DialogResult.OK;
-                Close();
-            }
         }
     }
 }

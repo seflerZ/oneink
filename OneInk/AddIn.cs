@@ -594,11 +594,15 @@ namespace OneInk
                         dialog.ShowDialog();
                     }
 
-                    if (dialog.DialogResult != DialogResult.OK || dialog.SelectedColor == null)
+                    if (dialog.DialogResult != DialogResult.OK || dialog.SelectedColors.Count == 0)
                         return;
 
-                    string selectedColor = dialog.SelectedColor;
-                    var idsToDelete = colorObjectIds[selectedColor];
+                    var idsToDelete = new List<string>();
+                    foreach (string selectedColor in dialog.SelectedColors)
+                    {
+                        if (colorObjectIds.ContainsKey(selectedColor))
+                            idsToDelete.AddRange(colorObjectIds[selectedColor]);
+                    }
 
                     foreach (string objectId in idsToDelete)
                         OneNoteApplication.DeletePageContent(pageId, objectId);
