@@ -54,6 +54,7 @@ namespace OneInk
 
         private static IRibbonUI _ribbon;
         private static int _selectedDensityIndex = 1; // default to medium
+        private static int _selectedSmoothIndex = 0; // default to curve (0)
 
         public AddIn()
         {
@@ -224,6 +225,11 @@ namespace OneInk
             ExecuteToDashed();
         }
 
+        public void SmoothInkButtonClicked(IRibbonControl control)
+        {
+            ExecuteToSmooth(_selectedSmoothIndex == 0); // Use current selection
+        }
+
         private void ExecuteToDashed()
         {
             try
@@ -344,6 +350,120 @@ namespace OneInk
             {
                 Log($"ExecuteToDashed ERROR: {ex}");
                 MessageBox.Show(string.Format(Strings.ErrorDashed, ex.Message));
+            }
+        }
+
+        private void ExecuteToSmooth(bool curveSmoothing)
+        {
+            try
+            {
+                if (OneNoteApplication == null)
+                {
+                    MessageBox.Show(Strings.AppNotAvailable);
+                    return;
+                }
+
+                string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
+
+                // Step 1: Get selection info using piSelection (fast ~20ms)
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piSelection);
+
+                var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument docSel;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
+                    docSel = XDocument.Load(reader);
+                XNamespace ns = docSel.Root.Name.Namespace;
+
+                // Get selected ink object IDs (marked with selected="all")
+                var selectedObjectIds = new HashSet<string>(
+                    docSel.Descendants(ns + "InkDrawing")
+                          .Where(e => e.Attribute("selected")?.Value == "all")
+                          .Select(e => e.Attribute("objectID")?.Value ?? "")
+                          .Where(id => !string.IsNullOrEmpty(id))
+                );
+
+                if (selectedObjectIds.Count == 0)
+                {
+                    try
+                    {
+                        var window = OneNoteApplication.Windows.CurrentWindow;
+                        var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                        MessageBox.Show(new OneNoteWindowOwner(hwnd), Strings.NoSelectionForDashed);
+                    }
+                    catch
+                    {
+                        MessageBox.Show(Strings.NoSelectionForDashed);
+                    }
+                    return;
+                }
+
+                // Step 2: Get page structure using piBasic (fast ~20ms)
+                OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
+
+                XDocument docBasic;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
+                    docBasic = XDocument.Load(reader);
+
+                // Build a dictionary of selected ink elements (for Position, Size, lastModifiedTime)
+                var selectedInkElements = docBasic.Descendants(ns + "InkDrawing")
+                    .Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? ""))
+                    .ToList();
+
+                // Step 3: For each selected ink, get binary data and smooth
+                int convertedCount = 0;
+                var inkXmlParts = new List<XElement>();
+
+                foreach (var inkEl in selectedInkElements)
+                {
+                    string objectId = inkEl.Attribute("objectID")?.Value;
+                    string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
+
+                    if (string.IsNullOrEmpty(objectId))
+                        continue;
+
+                    // Get binary data for this specific ink using GetBinaryPageContent
+                    OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
+                    if (string.IsNullOrEmpty(isfBase64))
+                        continue;
+
+                    // Smooth the stroke
+                    string smoothedBase64 = InkDashedConverter.SmoothStroke(isfBase64, curveSmoothing);
+                    if (string.IsNullOrEmpty(smoothedBase64))
+                        continue;
+
+                    // Build ink XML element with Position, Size, and new Data
+                    var inkXmlEl = new XElement(ns + "InkDrawing",
+                        new XAttribute("objectID", objectId),
+                        new XAttribute("lastModifiedTime", lastModified),
+                        inkEl.Element(ns + "Position"),
+                        inkEl.Element(ns + "Size"),
+                        new XElement(ns + "Data", smoothedBase64)
+                    );
+                    inkXmlParts.Add(inkXmlEl);
+                    convertedCount++;
+                }
+
+                if (convertedCount == 0)
+                {
+                    MessageBox.Show(Strings.NoInkStrokesInSelection);
+                    return;
+                }
+
+                // Step 4: Update page with partial XML (just the modified ink elements)
+                var pageEl = new XElement(ns + "Page",
+                    new XAttribute("ID", pageId)
+                );
+                foreach (var inkEl in inkXmlParts)
+                    pageEl.Add(inkEl);
+
+                var pageDoc = new XDocument(pageEl);
+                string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
+                OneNoteApplication.UpdatePageContent(pageXml);
+            }
+            catch (Exception ex)
+            {
+                Log($"ExecuteToSmooth ERROR: {ex}");
+                MessageBox.Show(string.Format(Strings.ErrorSmooth, ex.Message));
             }
         }
 
@@ -537,6 +657,7 @@ namespace OneInk
                     case "buttonClearInk": label = Strings.ButtonClearInkLabel; break;
                     case "buttonDeleteByColor": label = Strings.ButtonDeleteByColorLabel; break;
                     case "buttonToDashed": label = GetCurrentDashedLabel(); break;
+                    case "buttonSmooth": label = GetCurrentSmoothLabel(); break;
                     default: label = null; break;
                 }
                 return label;
@@ -561,6 +682,7 @@ namespace OneInk
                     case "buttonClearInk": tip = Strings.ButtonClearInkScreentip; break;
                     case "buttonDeleteByColor": tip = Strings.ButtonDeleteByColorScreentip; break;
                     case "buttonToDashed": tip = Strings.ButtonToDashedScreentip; break;
+                    case "buttonSmooth": tip = Strings.ButtonSmoothCurveScreentip; break;
                     default: tip = null; break;
                 }
                 return tip;
@@ -605,6 +727,28 @@ namespace OneInk
                 _ribbon.InvalidateControl("buttonToDashed");
         }
 
+        /// <summary>
+        /// Called when Smooth Curve menu item is clicked.
+        /// </summary>
+        public void OnMenuSmoothCurveClicked(IRibbonControl control)
+        {
+            _selectedSmoothIndex = 0;
+            Log($"OnMenuSmoothCurveClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonSmooth");
+        }
+
+        /// <summary>
+        /// Called when Smooth Poly menu item is clicked.
+        /// </summary>
+        public void OnMenuSmoothPolyClicked(IRibbonControl control)
+        {
+            _selectedSmoothIndex = 1;
+            Log($"OnMenuSmoothPolyClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonSmooth");
+        }
+
         private static string GetCurrentDashedLabel()
         {
             string densityName;
@@ -615,6 +759,12 @@ namespace OneInk
                 default: densityName = Strings.DashedMedium; break;
             }
             return $"{Strings.ButtonToDashedLabel}（{densityName}）";
+        }
+
+        private static string GetCurrentSmoothLabel()
+        {
+            string smoothName = _selectedSmoothIndex == 0 ? Strings.ButtonSmoothCurveLabel : Strings.ButtonSmoothPolyLabel;
+            return $"{Strings.ButtonSmoothLabel}（{smoothName}）";
         }
 
         /// <summary>
@@ -630,6 +780,15 @@ namespace OneInk
                 default: densityImage = "ToDashedMedium.png"; break;
             }
             return GetImage(densityImage);
+        }
+
+        /// <summary>
+        /// Returns the appropriate image for the Smooth button based on selected type.
+        /// </summary>
+        public IStream GetSmoothImage(IRibbonControl control)
+        {
+            string smoothImage = _selectedSmoothIndex == 0 ? "SmoothCurve.png" : "SmoothPoly.png";
+            return GetImage(smoothImage);
         }
 
         /// <summary>

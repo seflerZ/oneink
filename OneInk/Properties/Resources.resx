@@ -74,6 +74,13 @@
                             &lt;button id="menuItemSparse" label="稀疏" onAction="OnMenuSparseClicked" image="ToDashedSparse.png"/&gt;
                         &lt;/menu&gt;
                     &lt;/splitButton&gt;
+                    &lt;splitButton id="splitSmooth" size="large"&gt;
+                        &lt;button id="buttonSmooth" getLabel="GetLabel" getScreentip="GetScreentip" onAction="SmoothInkButtonClicked" getImage="GetSmoothImage"/&gt;
+                        &lt;menu&gt;
+                            &lt;button id="menuItemSmoothCurve" label="曲线" onAction="OnMenuSmoothCurveClicked" image="SmoothCurve.png"/&gt;
+                            &lt;button id="menuItemSmoothPoly" label="折线" onAction="OnMenuSmoothPolyClicked" image="SmoothPoly.png"/&gt;
+                        &lt;/menu&gt;
+                    &lt;/splitButton&gt;
                 &lt;/group&gt;
             &lt;/tab&gt;
         &lt;/tabs&gt;

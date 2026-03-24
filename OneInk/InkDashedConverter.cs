@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Linq;
 using Microsoft.Ink;
 
 namespace OneInk
@@ -128,6 +129,242 @@ namespace OneInk
                 zlib.CopyTo(output);
                 return output.ToArray();
             }
+        }
+
+        public static string SmoothStroke(string base64Data, bool curveSmoothing)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return null;
+
+            byte[] raw;
+            try
+            {
+                raw = Convert.FromBase64String(base64Data);
+            }
+            catch
+            {
+                return null;
+            }
+
+            try
+            {
+                var result = SmoothStrokeCore(raw, curveSmoothing);
+                if (result != null)
+                    return Convert.ToBase64String(result);
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static byte[] SmoothStrokeCore(byte[] isfData, bool curveSmoothing)
+        {
+            byte[] data = isfData;
+
+            // Try ZLIB decompression if the data appears compressed
+            if (isfData.Length > 0 && isfData[0] == 0x00 && isfData.Length > 4)
+            {
+                byte second = isfData[1];
+                if (second != 0x01)
+                {
+                    try { data = DecompressZlib(isfData); }
+                    catch { }
+                }
+            }
+
+            Ink srcInk = null;
+            try
+            {
+                srcInk = new Ink();
+                srcInk.Load(data);
+            }
+            catch
+            {
+                // Try stripping 0x00 prefix as fallback
+                if (isfData.Length > 0 && isfData[0] == 0x00)
+                {
+                    var stripped = new byte[isfData.Length - 1];
+                    Array.Copy(isfData, 1, stripped, 0, stripped.Length);
+                    try
+                    {
+                        srcInk = new Ink();
+                        srcInk.Load(stripped);
+                    }
+                    catch
+                    {
+                        if (srcInk != null) { srcInk.Dispose(); srcInk = null; }
+                    }
+                }
+                if (srcInk == null)
+                    return null;
+            }
+
+            if (srcInk.Strokes.Count == 0)
+            {
+                srcInk.Dispose();
+                return null;
+            }
+
+            var strokesData = new List<StrokeGeometry>(srcInk.Strokes.Count);
+            foreach (Stroke s in srcInk.Strokes)
+            {
+                strokesData.Add(ExtractStrokeGeometryForSmooth(s, curveSmoothing));
+            }
+            srcInk.Dispose();
+
+            var dstInk = new Ink();
+            foreach (var sg in strokesData)
+            {
+                CreateSmoothedStroke(dstInk, sg, curveSmoothing);
+            }
+
+            byte[] result = dstInk.Save();
+            dstInk.Dispose();
+            return result;
+        }
+
+        private static StrokeGeometry ExtractStrokeGeometryForSmooth(Stroke stroke, bool curveSmoothing)
+        {
+            var sg = new StrokeGeometry();
+            var rawPts = GetStrokePoints(stroke);
+
+            List<Point> smoothedPts;
+            if (curveSmoothing)
+            {
+                // Chaikin's algorithm for curve smoothing
+                smoothedPts = ChaikinsSmooth(rawPts, 3);
+            }
+            else
+            {
+                // Ramer-Douglas-Peucker for polyline simplification
+                smoothedPts = RDPSimplify(rawPts, 500); // epsilon = 500 HIMETRIC units (~12.7mm)
+            }
+
+            sg.Points = smoothedPts;
+            sg.Attr = stroke.DrawingAttributes.Clone();
+            return sg;
+        }
+
+        private static List<Point> ChaikinsSmooth(List<Point> pts, int iterations)
+        {
+            if (pts == null || pts.Count < 2)
+                return pts;
+
+            var result = new List<Point>(pts);
+
+            for (int iter = 0; iter < iterations; iter++)
+            {
+                var newPts = new List<Point>();
+                newPts.Add(result[0]);
+
+                for (int i = 0; i < result.Count - 1; i++)
+                {
+                    var p0 = result[i];
+                    var p1 = result[i + 1];
+
+                    // Q = 3/4 * P0 + 1/4 * P1
+                    int qx = (3 * p0.X + p1.X) / 4;
+                    int qy = (3 * p0.Y + p1.Y) / 4;
+
+                    // R = 1/4 * P0 + 3/4 * P1
+                    int rx = (p0.X + 3 * p1.X) / 4;
+                    int ry = (p0.Y + 3 * p1.Y) / 4;
+
+                    newPts.Add(new Point(qx, qy));
+                    newPts.Add(new Point(rx, ry));
+                }
+
+                newPts.Add(result[result.Count - 1]);
+                result = newPts;
+            }
+
+            return result;
+        }
+
+        private static List<Point> RDPSimplify(List<Point> pts, double epsilon)
+        {
+            if (pts == null || pts.Count < 3)
+                return pts;
+
+            // Direct RDP simplification - preserves overall shape, removes noise
+            return RDPSegment(pts, epsilon);
+        }
+
+        private static List<Point> RDPSegment(List<Point> pts, double epsilon)
+        {
+            if (pts == null || pts.Count < 3)
+                return pts;
+
+            double maxDist = 0;
+            int maxIndex = 0;
+
+            var first = pts[0];
+            var last = pts[pts.Count - 1];
+
+            for (int i = 1; i < pts.Count - 1; i++)
+            {
+                double dist = PerpendicularDistance(pts[i], first, last);
+                if (dist > maxDist)
+                {
+                    maxDist = dist;
+                    maxIndex = i;
+                }
+            }
+
+            if (maxDist > epsilon)
+            {
+                var left = RDPSegment(pts.GetRange(0, maxIndex + 1), epsilon);
+                var right = RDPSegment(pts.GetRange(maxIndex, pts.Count - maxIndex), epsilon);
+
+                var result = new List<Point>(left);
+                result.AddRange(right.GetRange(1, right.Count - 1));
+                return result;
+            }
+            else
+            {
+                return new List<Point> { first, last };
+            }
+        }
+
+        private static double PerpendicularDistance(Point pt, Point lineStart, Point lineEnd)
+        {
+            double dx = lineEnd.X - lineStart.X;
+            double dy = lineEnd.Y - lineStart.Y;
+
+            if (dx == 0 && dy == 0)
+            {
+                double px = pt.X - lineStart.X;
+                double py = pt.Y - lineStart.Y;
+                return Math.Sqrt(px * px + py * py);
+            }
+
+            double len = Math.Sqrt(dx * dx + dy * dy);
+            dx /= len;
+            dy /= len;
+
+            double vx = pt.X - lineStart.X;
+            double vy = pt.Y - lineStart.Y;
+
+            double cross = dx * vy - dy * vx;
+            return Math.Abs(cross);
+        }
+
+        private static void CreateSmoothedStroke(Ink ink, StrokeGeometry sg, bool curveSmoothing)
+        {
+            var pts = sg.Points;
+            if (pts.Count < 2)
+                return;
+
+            try
+            {
+                var s = ink.CreateStroke(pts.ToArray());
+                s.DrawingAttributes = sg.Attr;
+                // FitToCurve only makes sense for curve smoothing
+                s.DrawingAttributes.FitToCurve = curveSmoothing;
+            }
+            catch { }
         }
 
         private class StrokeGeometry
