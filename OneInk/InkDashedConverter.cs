@@ -210,8 +210,8 @@ namespace OneInk
             var sg = new StrokeGeometry();
             var rawPts = GetStrokePoints(stroke);
 
-            // Resample by fixed distance interval (2000 HIMETRIC ≈ 2mm)
-            var resampledPts = ResampleByDistance(rawPts, 2000);
+            // Resample by fixed distance interval (1000 HIMETRIC ≈ 1mm for more detail)
+            var resampledPts = ResampleByDistance(rawPts, 1000);
 
             List<Point> smoothedPts;
             if (curveSmoothing)
@@ -221,8 +221,22 @@ namespace OneInk
             }
             else
             {
-                // Ramer-Douglas-Peucker for polyline simplification
-                smoothedPts = RDPSimplify(resampledPts, 500); // epsilon = 500 HIMETRIC units (~12.7mm)
+                // Detect corners first before RDP simplification
+                var corners = new HashSet<int>();
+                for (int i = 1; i < resampledPts.Count - 1; i++)
+                {
+                    double angle = CalculateAngle(resampledPts[i - 1], resampledPts[i], resampledPts[i + 1]);
+                    double deviation = Math.Abs(180 - angle);
+                    if (deviation >= 30) // Corner: angle deviates > 30° from straight
+                    {
+                        corners.Add(i);
+                    }
+                }
+
+                // RDP simplification preserving corners
+                smoothedPts = RDPSimplifyPreservingCorners(resampledPts, 500, corners);
+                // Snap angles to multiples of 30 degrees
+                smoothedPts = SnapAnglesTo30(smoothedPts);
             }
 
             sg.Points = smoothedPts;
@@ -235,20 +249,11 @@ namespace OneInk
             if (pts == null || pts.Count < 2)
                 return pts;
 
-            // Estimate result size to reduce allocations
-            double totalLen = 0;
-            for (int i = 1; i < pts.Count; i++)
-            {
-                double dx = pts[i].X - pts[i - 1].X;
-                double dy = pts[i].Y - pts[i - 1].Y;
-                totalLen += Math.Sqrt(dx * dx + dy * dy);
-            }
-            int estimatedCount = Math.Max(2, (int)(totalLen / interval) + 2);
-
-            var result = new List<Point>(estimatedCount);
+            var result = new List<Point>(pts.Count);
             result.Add(pts[0]);
 
             double accumDist = 0;
+            int lastIdx = 0;
             Point lastPt = pts[0];
 
             for (int i = 1; i < pts.Count; i++)
@@ -283,40 +288,57 @@ namespace OneInk
             if (pts == null || pts.Count < 2 || iterations <= 0)
                 return pts;
 
-            // Pre-allocate array for smooth result (each iteration doubles points - 1)
-            int n = pts.Count;
-            Point[] result = pts.ToArray();
-            Point[] buffer = new Point[n * 2];
+            // For 1 iteration: result has 2*n - 1 points, direct calculation avoids buffer swapping
+            if (iterations == 1)
+            {
+                int n = pts.Count;
+                var result = new List<Point>(n * 2 - 1);
+                result.Add(pts[0]);
+
+                for (int i = 0; i < n - 1; i++)
+                {
+                    int p0x = pts[i].X, p0y = pts[i].Y;
+                    int p1x = pts[i + 1].X, p1y = pts[i + 1].Y;
+
+                    // Q = 3/4 * P0 + 1/4 * P1
+                    result.Add(new Point((3 * p0x + p1x) / 4, (3 * p0y + p1y) / 4));
+                    // R = 1/4 * P0 + 3/4 * P1
+                    result.Add(new Point((p0x + 3 * p1x) / 4, (p0y + 3 * p1y) / 4));
+                }
+
+                return result;
+            }
+
+            // For multiple iterations, use buffer swapping
+            int count = pts.Count;
+            Point[] arr = pts.ToArray();
+            Point[] buffer = new Point[count * 2];
 
             for (int iter = 0; iter < iterations; iter++)
             {
                 int j = 0;
-                buffer[j++] = result[0];
+                buffer[j++] = arr[0];
 
-                for (int i = 0; i < n - 1; i++)
+                for (int i = 0; i < count - 1; i++)
                 {
-                    int p0x = result[i].X, p0y = result[i].Y;
-                    int p1x = result[i + 1].X, p1y = result[i + 1].Y;
+                    int p0x = arr[i].X, p0y = arr[i].Y;
+                    int p1x = arr[i + 1].X, p1y = arr[i + 1].Y;
 
-                    // Q = 3/4 * P0 + 1/4 * P1
                     buffer[j++] = new Point((3 * p0x + p1x) / 4, (3 * p0y + p1y) / 4);
-                    // R = 1/4 * P0 + 3/4 * P1
                     buffer[j++] = new Point((p0x + 3 * p1x) / 4, (p0y + 3 * p1y) / 4);
                 }
 
-                buffer[j++] = result[n - 1];
+                buffer[j++] = arr[count - 1];
 
-                // Swap buffers
-                n = j;
-                var temp = result;
-                result = buffer;
+                count = j;
+                var temp = arr;
+                arr = buffer;
                 buffer = temp;
             }
 
-            // Copy result to a new list of correct size
-            var final = new List<Point>(n);
-            for (int i = 0; i < n; i++)
-                final.Add(result[i]);
+            var final = new List<Point>(count);
+            for (int i = 0; i < count; i++)
+                final.Add(arr[i]);
             return final;
         }
 
@@ -372,6 +394,221 @@ namespace OneInk
             }
 
             return result;
+        }
+
+        // RDP simplification that preserves corner points
+        private static List<Point> RDPSimplifyPreservingCorners(List<Point> pts, double epsilon, HashSet<int> corners)
+        {
+            if (pts == null || pts.Count < 3)
+                return pts;
+
+            // Mark corner indices as kept
+            var keepFlags = new bool[pts.Count];
+            keepFlags[0] = true;
+            keepFlags[pts.Count - 1] = true;
+            foreach (int c in corners)
+            {
+                keepFlags[c] = true;
+            }
+
+            // Use iterative RDP on non-corner segments
+            var stack = new Stack<(int start, int end)>();
+            stack.Push((0, pts.Count - 1));
+
+            while (stack.Count > 0)
+            {
+                var (start, end) = stack.Pop();
+                if (end - start < 2)
+                    continue;
+
+                // Check if this segment contains any corners
+                bool hasCorner = false;
+                for (int i = start + 1; i < end; i++)
+                {
+                    if (keepFlags[i])
+                    {
+                        hasCorner = true;
+                        break;
+                    }
+                }
+
+                if (hasCorner)
+                {
+                    // Find the first and last corner in segment
+                    int firstCorner = -1, lastCorner = -1;
+                    for (int i = start; i <= end; i++)
+                    {
+                        if (keepFlags[i])
+                        {
+                            if (firstCorner == -1) firstCorner = i;
+                            lastCorner = i;
+                        }
+                    }
+
+                    // Process sub-segment before first corner
+                    if (firstCorner > start)
+                        stack.Push((start, firstCorner));
+
+                    // Process sub-segment after last corner
+                    if (lastCorner < end)
+                        stack.Push((lastCorner, end));
+
+                    // Process sub-segments between consecutive corners
+                    int prev = firstCorner;
+                    for (int i = firstCorner + 1; i <= lastCorner; i++)
+                    {
+                        if (keepFlags[i] && i > prev)
+                        {
+                            if (i - prev > 1)
+                                stack.Push((prev, i));
+                            prev = i;
+                        }
+                    }
+                }
+                else
+                {
+                    // No corners in this segment, use standard RDP
+                    double maxDist = 0;
+                    int maxIndex = start;
+
+                    var first = pts[start];
+                    var last = pts[end];
+
+                    for (int i = start + 1; i < end; i++)
+                    {
+                        double dist = PerpendicularDistance(pts[i], first, last);
+                        if (dist > maxDist)
+                        {
+                            maxDist = dist;
+                            maxIndex = i;
+                        }
+                    }
+
+                    if (maxDist > epsilon)
+                    {
+                        keepFlags[maxIndex] = true;
+                        stack.Push((start, maxIndex));
+                        stack.Push((maxIndex, end));
+                    }
+                }
+            }
+
+            // Build result from kept points
+            var result = new List<Point>(pts.Count);
+            for (int i = 0; i < pts.Count; i++)
+            {
+                if (keepFlags[i])
+                    result.Add(pts[i]);
+            }
+
+            return result;
+        }
+
+        // Snap all segment angles to 30-degree multiples
+        private static List<Point> SnapAnglesTo30(List<Point> pts)
+        {
+            if (pts == null || pts.Count < 2)
+                return pts;
+
+            // Pre-process: merge very short segments (< 100 HIMETRIC ~2.5mm)
+            var merged = new List<Point>(pts.Count);
+            merged.Add(pts[0]);
+
+            for (int i = 1; i < pts.Count - 1; i++)
+            {
+                double dx = pts[i].X - merged[merged.Count - 1].X;
+                double dy = pts[i].Y - merged[merged.Count - 1].Y;
+                double dist = Math.Sqrt(dx * dx + dy * dy);
+
+                // Only add point if it's far enough from the last merged point
+                if (dist >= 100 || i == pts.Count - 2)
+                    merged.Add(pts[i]);
+            }
+            merged.Add(pts[pts.Count - 1]);
+
+            // Now snap each segment
+            var result = new List<Point>();
+            result.Add(merged[0]);
+
+            for (int i = 0; i < merged.Count - 1; i++)
+            {
+                double dx = merged[i + 1].X - merged[i].X;
+                double dy = merged[i + 1].Y - merged[i].Y;
+                double length = Math.Sqrt(dx * dx + dy * dy);
+
+                if (length < 1)
+                    continue;
+
+                // Calculate angle
+                double angleRad = Math.Atan2(-dy, dx);
+                double angleDeg = angleRad * 180.0 / Math.PI;
+                if (angleDeg < 0) angleDeg += 360;
+
+                // Snap to nearest 30 degrees
+                double snappedAngle = Math.Round(angleDeg / 30) * 30;
+                if (snappedAngle >= 360) snappedAngle -= 360;
+                if (snappedAngle < 0) snappedAngle += 360;
+
+                // Calculate new endpoint
+                double snappedRad = snappedAngle * Math.PI / 180.0;
+                int newX = merged[i].X + (int)Math.Round(length * Math.Cos(snappedRad));
+                int newY = merged[i].Y - (int)Math.Round(length * Math.Sin(snappedRad));
+
+                result.Add(new Point(newX, newY));
+            }
+
+            return result;
+        }
+
+        // Snap a single segment's angle to nearest 30 degrees, append to result
+        private static void SnapSegmentAngle(List<Point> pts, List<Point> result, int start, int end)
+        {
+            if (end <= start) return;
+
+            double dx = pts[end].X - pts[start].X;
+            double dy = pts[end].Y - pts[start].Y;
+            double length = Math.Sqrt(dx * dx + dy * dy);
+
+            if (length < 1)
+                return;
+
+            // Calculate angle
+            double angleRad = Math.Atan2(-dy, dx); // Negative dy because Y increases downward
+            double angleDeg = angleRad * 180.0 / Math.PI;
+            if (angleDeg < 0) angleDeg += 360;
+
+            // Snap to nearest 30 degrees
+            double snappedAngle = Math.Round(angleDeg / 30) * 30;
+            if (snappedAngle >= 360) snappedAngle -= 360;
+            if (snappedAngle < 0) snappedAngle += 360;
+
+            // Calculate new endpoint
+            double snappedRad = snappedAngle * Math.PI / 180.0;
+            int newX = pts[start].X + (int)Math.Round(length * Math.Cos(snappedRad));
+            int newY = pts[start].Y - (int)Math.Round(length * Math.Sin(snappedRad));
+
+            result.Add(new Point(newX, newY));
+        }
+
+        private static double CalculateAngle(Point p1, Point p2, Point p3)
+        {
+            double v1x = p1.X - p2.X;
+            double v1y = p1.Y - p2.Y;
+
+            double v2x = p3.X - p2.X;
+            double v2y = p3.Y - p2.Y;
+
+            double dot = v1x * v2x + v1y * v2y;
+            double len1 = Math.Sqrt(v1x * v1x + v1y * v1y);
+            double len2 = Math.Sqrt(v2x * v2x + v2y * v2y);
+
+            if (len1 < 1e-10 || len2 < 1e-10)
+                return 180;
+
+            double cosAngle = Math.Max(-1, Math.Min(1, dot / (len1 * len2)));
+            double angleRad = Math.Acos(cosAngle);
+
+            return angleRad * 180.0 / Math.PI;
         }
 
         private static double PerpendicularDistance(Point pt, Point lineStart, Point lineEnd)
