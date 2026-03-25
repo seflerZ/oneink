@@ -253,7 +253,6 @@ namespace OneInk
             result.Add(pts[0]);
 
             double accumDist = 0;
-            int lastIdx = 0;
             Point lastPt = pts[0];
 
             for (int i = 1; i < pts.Count; i++)
@@ -558,36 +557,6 @@ namespace OneInk
             }
 
             return result;
-        }
-
-        // Snap a single segment's angle to nearest 30 degrees, append to result
-        private static void SnapSegmentAngle(List<Point> pts, List<Point> result, int start, int end)
-        {
-            if (end <= start) return;
-
-            double dx = pts[end].X - pts[start].X;
-            double dy = pts[end].Y - pts[start].Y;
-            double length = Math.Sqrt(dx * dx + dy * dy);
-
-            if (length < 1)
-                return;
-
-            // Calculate angle
-            double angleRad = Math.Atan2(-dy, dx); // Negative dy because Y increases downward
-            double angleDeg = angleRad * 180.0 / Math.PI;
-            if (angleDeg < 0) angleDeg += 360;
-
-            // Snap to nearest 30 degrees
-            double snappedAngle = Math.Round(angleDeg / 30) * 30;
-            if (snappedAngle >= 360) snappedAngle -= 360;
-            if (snappedAngle < 0) snappedAngle += 360;
-
-            // Calculate new endpoint
-            double snappedRad = snappedAngle * Math.PI / 180.0;
-            int newX = pts[start].X + (int)Math.Round(length * Math.Cos(snappedRad));
-            int newY = pts[start].Y - (int)Math.Round(length * Math.Sin(snappedRad));
-
-            result.Add(new Point(newX, newY));
         }
 
         private static double CalculateAngle(Point p1, Point p2, Point p3)
