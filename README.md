@@ -11,6 +11,10 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
   - **Smooth Curve (曲线平滑)**: Chaikin's algorithm for flowing Bezier curves
   - **Smooth Polyline (折线平滑)**: Ramer-Douglas-Peucker algorithm for simplified straight-line segments
   - If ink is selected (lasso), only selected ink is smoothed
+- **Align Ink**: Align multiple selected ink strokes by their edges — supports two modes:
+  - **Align Top (顶边对齐)**: Aligns all ink strokes to the highest (topmost) stroke's top edge
+  - **Align Bottom (底边对齐)**: Aligns all ink strokes to the lowest (bottommost) stroke's bottom edge
+  - If ink is selected (lasso), only selected ink is aligned
 
 ## Installing the release pacakge
 Just unzip the release file and execute the install.ps1 script as Administrator.
@@ -87,6 +91,14 @@ After installation, open OneNote. A **OneInk** tab appears in the ribbon with to
   - Curve smoothing uses Chaikin's algorithm to create flowing Bezier curves
   - Polyline smoothing uses Ramer-Douglas-Peucker algorithm to simplify strokes to straight segments
   - If ink is selected (lasso selection), only selected ink is smoothed
+- **Align Ink** (split button):
+  - Main button label shows current mode (e.g., `对齐（顶边对齐）`)
+  - Click the dropdown arrow to select mode: **顶边对齐** (align top) or **底边对齐** (align bottom)
+  - Each mode has its own icon; clicking a menu item updates the button label and icon
+  - Click the main button to align ink with the selected mode
+  - Align Top aligns all selected ink strokes to the highest stroke's top edge
+  - Align Bottom aligns all selected ink strokes to the lowest stroke's bottom edge
+  - Requires at least 2 ink strokes to be selected (lasso selection)
 
 ## Project Structure
 
@@ -99,7 +111,7 @@ OneInk/
 │   ├── ReadOnlyStream.cs   # IStream COM wrapper
 │   ├── ColorSelectionDialog.cs # Ink color selection dialog (multi-select)
 │   ├── InkColorExtractor.cs  # ISF color extraction via Microsoft.Ink
-│   ├── InkDashedConverter.cs # Ink conversion: dashed lines + smoothing via Microsoft.Ink
+│   ├── InkDashedConverter.cs # Ink conversion: dashed lines + smoothing + alignment via Microsoft.Ink
 │   ├── Strings.cs           # i18n (Chinese/English)
 │   ├── Resources/           # Ribbon icons
 │   └── Properties/

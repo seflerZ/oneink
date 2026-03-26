@@ -55,6 +55,7 @@ namespace OneInk
         private static IRibbonUI _ribbon;
         private static int _selectedDensityIndex = 1; // default to medium
         private static int _selectedSmoothIndex = 0; // default to curve (0)
+        private static int _selectedAlignIndex = 0; // default to top (0), bottom (1)
 
         public AddIn()
         {
@@ -467,6 +468,176 @@ namespace OneInk
             }
         }
 
+        private void ExecuteAlign(bool alignTop)
+        {
+            try
+            {
+                if (OneNoteApplication == null)
+                {
+                    MessageBox.Show(Strings.AppNotAvailable);
+                    return;
+                }
+
+                string pageId = OneNoteApplication.Windows.CurrentWindow.CurrentPageId;
+
+                // Step 1: Get selection info using piSelection (fast ~20ms)
+                OneNoteApplication.GetPageContent(pageId, out string xmlSelection, Microsoft.Office.Interop.OneNote.PageInfo.piSelection);
+
+                var selSettings = new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore };
+                XDocument docSel;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlSelection ?? ""), selSettings))
+                    docSel = XDocument.Load(reader);
+                XNamespace ns = docSel.Root.Name.Namespace;
+
+                // Get selected ink object IDs (marked with selected="all")
+                var selectedObjectIds = new HashSet<string>(
+                    docSel.Descendants(ns + "InkDrawing")
+                          .Where(e => e.Attribute("selected")?.Value == "all")
+                          .Select(e => e.Attribute("objectID")?.Value ?? "")
+                          .Where(id => !string.IsNullOrEmpty(id))
+                );
+
+                if (selectedObjectIds.Count == 0)
+                {
+                    try
+                    {
+                        var window = OneNoteApplication.Windows.CurrentWindow;
+                        var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                        MessageBox.Show(new OneNoteWindowOwner(hwnd), Strings.NoSelectionForDashed);
+                    }
+                    catch
+                    {
+                        MessageBox.Show(Strings.NoSelectionForDashed);
+                    }
+                    return;
+                }
+
+                if (selectedObjectIds.Count < 2)
+                {
+                    MessageBox.Show(Strings.IsChinese ? "请选择至少两个墨迹对象进行对齐。" : "Please select at least two ink objects to align.");
+                    return;
+                }
+
+                // Step 2: Get page structure using piBasic (fast ~20ms)
+                OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
+
+                XDocument docBasic;
+                using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
+                    docBasic = XDocument.Load(reader);
+
+                // Build a list of selected ink elements with Position and Size
+                var selectedInkElements = docBasic.Descendants(ns + "InkDrawing")
+                    .Where(e => selectedObjectIds.Contains(e.Attribute("objectID")?.Value ?? ""))
+                    .ToList();
+
+                if (selectedInkElements.Count < 2)
+                {
+                    MessageBox.Show(Strings.IsChinese ? "请选择至少两个墨迹对象进行对齐。" : "Please select at least two ink objects to align.");
+                    return;
+                }
+
+                // Find reference: for top align use highest ink, for bottom align use lowest ink
+                double referenceY;
+                if (alignTop)
+                {
+                    // Top align: find ink with smallest Y (highest on screen)
+                    referenceY = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("y")?.Value ?? "0"))
+                        .Min();
+                }
+                else
+                {
+                    // Bottom align: find ink with largest Y + height (lowest on screen)
+                    referenceY = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("y")?.Value ?? "0") +
+                                     double.Parse(e.Element(ns + "Size")?.Attribute("height")?.Value ?? "0"))
+                        .Max();
+                }
+
+                // Step 3: For each selected ink, calculate offset and move strokes
+                int alignedCount = 0;
+                var inkXmlParts = new List<XElement>();
+
+                foreach (var inkEl in selectedInkElements)
+                {
+                    string objectId = inkEl.Attribute("objectID")?.Value;
+                    string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
+
+                    if (string.IsNullOrEmpty(objectId))
+                        continue;
+
+                    var pos = inkEl.Element(ns + "Position");
+                    var size = inkEl.Element(ns + "Size");
+
+                    if (pos == null || size == null)
+                        continue;
+
+                    double inkX = double.Parse(pos.Attribute("x")?.Value ?? "0");
+                    double inkY = double.Parse(pos.Attribute("y")?.Value ?? "0");
+                    double inkHeight = double.Parse(size.Attribute("height")?.Value ?? "0");
+
+                    // Calculate target Y position based on alignment type
+                    // For top alignment: targetY = referenceY (align all tops to highest ink)
+                    // For bottom alignment: targetY = referenceY - inkHeight (align all bottoms to lowest ink)
+                    double targetY = alignTop ? referenceY : referenceY - inkHeight;
+
+                    // Calculate Y offset needed to move ink's TOP edge to targetY
+                    double yOffset = targetY - inkY;
+
+                    // Skip if no offset needed (same position as reference)
+                    if (Math.Abs(yOffset) < 0.01)
+                        continue;
+
+                    // Get binary data for this specific ink using GetBinaryPageContent
+                    OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
+                    if (string.IsNullOrEmpty(isfBase64))
+                        continue;
+
+                    // Move the strokes by the offset
+                    string movedBase64 = InkDashedConverter.MoveStroke(isfBase64, 0, yOffset);
+                    if (string.IsNullOrEmpty(movedBase64))
+                        continue;
+
+                    // Build ink XML element with new Position (only Y changed), Size, and new Data
+                    var newPos = new XElement(ns + "Position",
+                        new XAttribute("x", inkX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new XAttribute("y", targetY.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    );
+
+                    var inkXmlEl = new XElement(ns + "InkDrawing",
+                        new XAttribute("objectID", objectId),
+                        new XAttribute("lastModifiedTime", lastModified),
+                        newPos,
+                        size,
+                        new XElement(ns + "Data", movedBase64)
+                    );
+                    inkXmlParts.Add(inkXmlEl);
+                    alignedCount++;
+                }
+
+                if (alignedCount == 0)
+                {
+                    return;
+                }
+
+                // Step 4: Update page with partial XML (just the modified ink elements)
+                var pageEl = new XElement(ns + "Page",
+                    new XAttribute("ID", pageId)
+                );
+                foreach (var inkEl in inkXmlParts)
+                    pageEl.Add(inkEl);
+
+                var pageDoc = new XDocument(pageEl);
+                string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
+                OneNoteApplication.UpdatePageContent(pageXml);
+            }
+            catch (Exception ex)
+            {
+                Log($"ExecuteAlign ERROR: {ex}");
+                MessageBox.Show(string.Format(Strings.ErrorAlign, ex.Message));
+            }
+        }
+
         /// <summary>
         /// Button click handler for deleting ink strokes by selected color.
         /// Parses ISF (Ink Serialized Format) data from each InkDrawing to extract
@@ -662,6 +833,7 @@ namespace OneInk
                     case "buttonDeleteByColor": label = Strings.ButtonDeleteByColorLabel; break;
                     case "buttonToDashed": label = GetCurrentDashedLabel(); break;
                     case "buttonSmooth": label = GetCurrentSmoothLabel(); break;
+                    case "buttonAlign": label = GetCurrentAlignLabel(); break;
                     default: label = null; break;
                 }
                 return label;
@@ -687,6 +859,7 @@ namespace OneInk
                     case "buttonDeleteByColor": tip = Strings.ButtonDeleteByColorScreentip; break;
                     case "buttonToDashed": tip = Strings.ButtonToDashedScreentip; break;
                     case "buttonSmooth": tip = Strings.ButtonSmoothCurveScreentip; break;
+                    case "buttonAlign": tip = _selectedAlignIndex == 0 ? Strings.ButtonAlignTopScreentip : Strings.ButtonAlignBottomScreentip; break;
                     default: tip = null; break;
                 }
                 return tip;
@@ -753,6 +926,36 @@ namespace OneInk
                 _ribbon.InvalidateControl("buttonSmooth");
         }
 
+        /// <summary>
+        /// Button click handler for aligning selected ink.
+        /// </summary>
+        public void AlignInkButtonClicked(IRibbonControl control)
+        {
+            ExecuteAlign(_selectedAlignIndex == 0); // true = align top, false = align bottom
+        }
+
+        /// <summary>
+        /// Called when Align Top menu item is clicked.
+        /// </summary>
+        public void OnMenuAlignTopClicked(IRibbonControl control)
+        {
+            _selectedAlignIndex = 0;
+            Log($"OnMenuAlignTopClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonAlign");
+        }
+
+        /// <summary>
+        /// Called when Align Bottom menu item is clicked.
+        /// </summary>
+        public void OnMenuAlignBottomClicked(IRibbonControl control)
+        {
+            _selectedAlignIndex = 1;
+            Log($"OnMenuAlignBottomClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonAlign");
+        }
+
         private static string GetCurrentDashedLabel()
         {
             string densityName;
@@ -769,6 +972,12 @@ namespace OneInk
         {
             string smoothName = _selectedSmoothIndex == 0 ? Strings.ButtonSmoothCurveLabel : Strings.ButtonSmoothPolyLabel;
             return $"{Strings.ButtonSmoothLabel}（{smoothName}）";
+        }
+
+        private static string GetCurrentAlignLabel()
+        {
+            string alignName = _selectedAlignIndex == 0 ? Strings.ButtonAlignTopLabel : Strings.ButtonAlignBottomLabel;
+            return $"{Strings.ButtonAlignLabel}（{alignName}）";
         }
 
         /// <summary>
@@ -793,6 +1002,15 @@ namespace OneInk
         {
             string smoothImage = _selectedSmoothIndex == 0 ? "SmoothCurve.png" : "SmoothPoly.png";
             return GetImage(smoothImage);
+        }
+
+        /// <summary>
+        /// Returns the appropriate image for the Align button based on selected type.
+        /// </summary>
+        public IStream GetAlignImage(IRibbonControl control)
+        {
+            string alignImage = _selectedAlignIndex == 0 ? "AlignTop.png" : "AlignBottom.png";
+            return GetImage(alignImage);
         }
 
         /// <summary>

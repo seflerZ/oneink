@@ -175,6 +175,82 @@ namespace OneInk
             }
         }
 
+        public static string MoveStroke(string base64Data, double xOffset, double yOffset)
+        {
+            if (string.IsNullOrEmpty(base64Data))
+                return null;
+
+            byte[] raw;
+            try
+            {
+                raw = Convert.FromBase64String(base64Data);
+            }
+            catch
+            {
+                return null;
+            }
+
+            try
+            {
+                var result = MoveStrokeCore(raw, xOffset, yOffset);
+                if (result != null)
+                    return Convert.ToBase64String(result);
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static byte[] MoveStrokeCore(byte[] isfData, double xOffset, double yOffset)
+        {
+            Ink srcInk = LoadIsf(isfData, out _);
+            if (srcInk == null)
+                return null;
+
+            if (srcInk.Strokes.Count == 0)
+            {
+                srcInk.Dispose();
+                return null;
+            }
+
+            if (Math.Abs(xOffset) < 0.01 && Math.Abs(yOffset) < 0.01)
+            {
+                // No movement needed, return original
+                srcInk.Dispose();
+                return isfData;
+            }
+
+            // Create a new ink with moved strokes
+            var dstInk = new Ink();
+            foreach (Stroke s in srcInk.Strokes)
+            {
+                var pts = GetStrokePoints(s);
+                if (pts.Count < 2)
+                    continue;
+
+                // Apply offset to all points
+                var movedPts = new System.Collections.Generic.List<Point>(pts.Count);
+                foreach (var pt in pts)
+                {
+                    movedPts.Add(new Point((int)(pt.X + xOffset), (int)(pt.Y + yOffset)));
+                }
+
+                try
+                {
+                    var newStroke = dstInk.CreateStroke(movedPts.ToArray());
+                    newStroke.DrawingAttributes = s.DrawingAttributes.Clone();
+                }
+                catch { }
+            }
+
+            byte[] result = dstInk.Save();
+            srcInk.Dispose();
+            dstInk.Dispose();
+            return result;
+        }
+
         private static byte[] SmoothStrokeCore(byte[] isfData, bool curveSmoothing)
         {
             Ink srcInk = LoadIsf(isfData, out _);
