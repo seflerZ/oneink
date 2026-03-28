@@ -10,7 +10,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using Microsoft.Ink;
 
 namespace OneInk
@@ -930,6 +929,276 @@ namespace OneInk
                 if (cumLen[mid] <= target) lo = mid; else hi = mid - 1;
             }
             return lo;
+        }
+
+        // ========== Alignment Clustering Methods ==========
+
+        internal class StrokeClusterPoint
+        {
+            public double X { get; set; }
+            public double Y { get; set; }
+            public double Width { get; set; }
+            public double Height { get; set; }
+            public string ObjectId { get; set; }
+            public Stroke Stroke { get; set; }
+        }
+
+        internal class StrokeCluster
+        {
+            public System.Collections.Generic.List<StrokeClusterPoint> Points { get; set; } = new System.Collections.Generic.List<StrokeClusterPoint>();
+            public double CentroidX { get; set; }
+            public double CentroidY { get; set; }
+            public double GroupX { get; set; }
+            public double GroupY { get; set; }
+            public double GroupWidth { get; set; }
+            public double GroupHeight { get; set; }
+            public double GroupMaxY { get; set; }
+        }
+
+        private class InkDrawingBounds
+        {
+            public string ObjectId { get; set; }
+            public double X { get; set; }
+            public double Y { get; set; }
+            public double Width { get; set; }
+            public double Height { get; set; }
+            public double MaxY { get; set; }
+            public int PointCount { get; set; }
+        }
+
+        private class InkDrawingCluster
+        {
+            public System.Collections.Generic.List<int> Indices { get; set; } = new System.Collections.Generic.List<int>();
+            public InkDrawingBounds Bounds { get; set; }
+        }
+
+        /// <summary>
+        /// Clusters InkDrawings using hierarchical clustering. Each InkDrawing is treated as atomic.
+        /// </summary>
+        internal static System.Collections.Generic.List<StrokeCluster> ClusterInkDrawings(string[] isfBase64Array, string[] objectIds, double[] inkDrawingYPositions, double[] inkDrawingHeights)
+        {
+            if (isfBase64Array.Length == 0)
+                return new System.Collections.Generic.List<StrokeCluster>();
+
+            var inkDrawingBounds = new System.Collections.Generic.List<InkDrawingBounds>();
+
+            for (int i = 0; i < isfBase64Array.Length; i++)
+            {
+                string isfBase64 = isfBase64Array[i];
+                string objectId = objectIds[i];
+                double inkDrawingY = (inkDrawingYPositions != null && i < inkDrawingYPositions.Length) ? inkDrawingYPositions[i] : 0;
+                double inkDrawingHeight = (inkDrawingHeights != null && i < inkDrawingHeights.Length) ? inkDrawingHeights[i] : 0;
+
+                if (string.IsNullOrEmpty(isfBase64))
+                    continue;
+
+                byte[] raw;
+                try
+                {
+                    raw = System.Convert.FromBase64String(isfBase64);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                Ink ink = null;
+                try
+                {
+                    ink = LoadIsf(raw, out _);
+                    if (ink == null || ink.Strokes.Count == 0)
+                        continue;
+
+                    double minX = double.MaxValue, minY = double.MaxValue;
+                    double maxX = double.MinValue, maxY = double.MinValue;
+
+                    foreach (Stroke s in ink.Strokes)
+                    {
+                        var bbox = s.GetBoundingBox();
+                        minX = System.Math.Min(minX, bbox.X);
+                        minY = System.Math.Min(minY, bbox.Y);
+                        maxX = System.Math.Max(maxX, bbox.X + bbox.Width);
+                        maxY = System.Math.Max(maxY, bbox.Y + bbox.Height);
+                    }
+
+                    double isfHeight = maxY - minY;
+                    double bottomHeight = inkDrawingHeight > 0 ? (isfHeight + inkDrawingHeight) / 2 : isfHeight;
+
+                    inkDrawingBounds.Add(new InkDrawingBounds
+                    {
+                        ObjectId = objectId,
+                        X = minX,
+                        Y = inkDrawingY,
+                        Width = maxX - minX,
+                        Height = isfHeight,
+                        MaxY = bottomHeight,
+                        PointCount = ink.Strokes.Count
+                    });
+                }
+                finally
+                {
+                    if (ink != null) ink.Dispose();
+                }
+            }
+
+            if (inkDrawingBounds.Count == 0)
+                return new System.Collections.Generic.List<StrokeCluster>();
+
+            if (inkDrawingBounds.Count == 1)
+            {
+                var points = new System.Collections.Generic.List<StrokeClusterPoint>
+                {
+                    new StrokeClusterPoint
+                    {
+                        X = inkDrawingBounds[0].X,
+                        Y = inkDrawingBounds[0].Y,
+                        Width = inkDrawingBounds[0].Width,
+                        Height = inkDrawingBounds[0].Height,
+                        ObjectId = inkDrawingBounds[0].ObjectId
+                    }
+                };
+                var cluster = new StrokeCluster { Points = points };
+                CalculateClusterBounds(cluster);
+                cluster.GroupMaxY = inkDrawingBounds[0].MaxY;
+                return new System.Collections.Generic.List<StrokeCluster> { cluster };
+            }
+
+            // Hierarchical clustering
+            var clusters = new System.Collections.Generic.List<InkDrawingCluster>();
+            for (int i = 0; i < inkDrawingBounds.Count; i++)
+            {
+                clusters.Add(new InkDrawingCluster
+                {
+                    Indices = new System.Collections.Generic.List<int> { i },
+                    Bounds = inkDrawingBounds[i]
+                });
+            }
+
+            double mergeThreshold = 2500;
+
+            while (clusters.Count > 1)
+            {
+                double minDist = double.MaxValue;
+                int mergeI = -1, mergeJ = -1;
+
+                for (int i = 0; i < clusters.Count; i++)
+                {
+                    for (int j = i + 1; j < clusters.Count; j++)
+                    {
+                        double dist = ClusterDistance(inkDrawingBounds, clusters[i], clusters[j]);
+                        if (dist < minDist)
+                        {
+                            minDist = dist;
+                            mergeI = i;
+                            mergeJ = j;
+                        }
+                    }
+                }
+
+                if (minDist > mergeThreshold || mergeI < 0)
+                    break;
+
+                clusters[mergeI].Indices.AddRange(clusters[mergeJ].Indices);
+                clusters[mergeI].Bounds = CalculateMergedBounds(inkDrawingBounds, clusters[mergeI].Indices);
+                clusters.RemoveAt(mergeJ);
+            }
+
+            var result = new System.Collections.Generic.List<StrokeCluster>();
+            foreach (var inkCluster in clusters)
+            {
+                var points = new System.Collections.Generic.List<StrokeClusterPoint>();
+                foreach (int idx in inkCluster.Indices)
+                {
+                    points.Add(new StrokeClusterPoint
+                    {
+                        X = inkDrawingBounds[idx].X,
+                        Y = inkDrawingBounds[idx].Y,
+                        Width = inkDrawingBounds[idx].Width,
+                        Height = inkDrawingBounds[idx].Height,
+                        ObjectId = inkDrawingBounds[idx].ObjectId
+                    });
+                }
+                var cluster = new StrokeCluster { Points = points };
+                CalculateClusterBounds(cluster);
+                cluster.GroupMaxY = inkCluster.Bounds.MaxY;
+                result.Add(cluster);
+            }
+
+            return result;
+        }
+
+        private static void CalculateClusterBounds(StrokeCluster cluster)
+        {
+            if (cluster.Points.Count == 0) return;
+
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+
+            foreach (var pt in cluster.Points)
+            {
+                if (pt.X < minX) minX = pt.X;
+                if (pt.Y < minY) minY = pt.Y;
+                if (pt.X + pt.Width > maxX) maxX = pt.X + pt.Width;
+                if (pt.Y + pt.Height > maxY) maxY = pt.Y + pt.Height;
+            }
+
+            cluster.GroupX = minX;
+            cluster.GroupY = minY;
+            cluster.GroupWidth = maxX - minX;
+            cluster.GroupHeight = maxY - minY;
+        }
+
+        private static double ClusterDistance(System.Collections.Generic.List<InkDrawingBounds> bounds, InkDrawingCluster c1, InkDrawingCluster c2)
+        {
+            double minDist = double.MaxValue;
+            foreach (int i in c1.Indices)
+            {
+                foreach (int j in c2.Indices)
+                {
+                    double dist = BoundsDistance(bounds[i], bounds[j]);
+                    if (dist < minDist)
+                        minDist = dist;
+                }
+            }
+            return minDist;
+        }
+
+        private static double BoundsDistance(InkDrawingBounds b1, InkDrawingBounds b2)
+        {
+            double center1_x = b1.X + b1.Width / 2;
+            double center1_y = b1.Y + b1.Height / 2;
+            double center2_x = b2.X + b2.Width / 2;
+            double center2_y = b2.Y + b2.Height / 2;
+
+            double dx = center1_x - center2_x;
+            double dy = center1_y - center2_y;
+
+            return System.Math.Sqrt(dx * dx + dy * dy);
+        }
+
+        private static InkDrawingBounds CalculateMergedBounds(System.Collections.Generic.List<InkDrawingBounds> bounds, System.Collections.Generic.List<int> indices)
+        {
+            double minX = double.MaxValue;
+            double minY = double.MaxValue;
+            double maxX = double.MinValue;
+            double maxBottomY = double.MinValue;
+
+            foreach (int idx in indices)
+            {
+                minX = System.Math.Min(minX, bounds[idx].X);
+                minY = System.Math.Min(minY, bounds[idx].Y);
+                maxX = System.Math.Max(maxX, bounds[idx].X + bounds[idx].Width);
+                maxBottomY = System.Math.Max(maxBottomY, bounds[idx].Y + bounds[idx].MaxY);
+            }
+
+            return new InkDrawingBounds
+            {
+                X = minX,
+                Y = minY,
+                Width = maxX - minX,
+                Height = maxBottomY - minY,
+                MaxY = maxBottomY
+            };
         }
     }
 }

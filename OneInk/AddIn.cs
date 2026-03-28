@@ -536,106 +536,200 @@ namespace OneInk
                     return;
                 }
 
-                // Find reference: for top align use highest ink, for bottom align use lowest ink
+                // Step 3: Get ISF data and positions for each selected ink
+                var objectIds = selectedInkElements
+                        .Select(e => e.Attribute("objectID")?.Value ?? "")
+                        .Where(id => !string.IsNullOrEmpty(id))
+                        .ToArray();
+
+                var inkDrawingYPositions = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("y")?.Value ?? "0"))
+                        .ToArray();
+
+                var inkDrawingHeights = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Size")?.Attribute("height")?.Value ?? "0"))
+                        .ToArray();
+
+                var isfDataArray = new string[objectIds.Length];
+                for (int i = 0; i < objectIds.Length; i++)
+                {
+                    OneNoteApplication.GetBinaryPageContent(pageId, objectIds[i], out string isfBase64);
+                    isfDataArray[i] = isfBase64 ?? "";
+                }
+
+                // Calculate collective bounding box of all selected strokes
+                // Use hierarchical clustering at InkDrawing level to keep each InkDrawing atomic
+                var clusters = InkDashedConverter.ClusterInkDrawings(isfDataArray, objectIds, inkDrawingYPositions, inkDrawingHeights);
+
+                if (clusters.Count == 0)
+                {
+                    MessageBox.Show(Strings.IsChinese ? "没有可对齐的墨迹。" : "No ink strokes to align.");
+                    return;
+                }
+
+                Log($"ExecuteAlign: hierarchical clustering got {clusters.Count} clusters");
+
+                // Calculate reference Y based on alignment type and cluster bounds
                 double referenceY;
                 if (alignTop)
                 {
-                    // Top align: find ink with smallest Y (highest on screen)
-                    referenceY = selectedInkElements
-                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("y")?.Value ?? "0"))
-                        .Min();
+                    // Top alignment: align all strokes' tops to the highest (smallest Y)
+                    referenceY = clusters.Min(c => c.GroupY);
                 }
                 else
                 {
-                    // Bottom align: find ink with largest Y + height (lowest on screen)
-                    referenceY = selectedInkElements
-                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("y")?.Value ?? "0") +
-                                     double.Parse(e.Element(ns + "Size")?.Attribute("height")?.Value ?? "0"))
-                        .Max();
+                    // Bottom alignment: align all strokes' bottoms to the lowest bottom
+                    // Bottom = PositionY + SizeHeight
+                    double maxBottom = double.MinValue;
+                    for (int i = 0; i < objectIds.Length; i++)
+                    {
+                        double bottom = inkDrawingYPositions[i] + inkDrawingHeights[i];
+                        if (bottom > maxBottom) maxBottom = bottom;
+                    }
+                    referenceY = maxBottom;
                 }
 
-                // Step 3: For each selected ink, calculate offset and move strokes
-                int alignedCount = 0;
-                var inkXmlParts = new List<XElement>();
+                Log($"ExecuteAlign: alignTop={alignTop}, referenceY={referenceY}, clusters={clusters.Count}");
 
-                foreach (var inkEl in selectedInkElements)
+                // Log all ink drawing positions
+                // Calculate offset for each object based on its cluster
+                var inkOffsets = new Dictionary<string, double>();
+                foreach (var cluster in clusters)
                 {
-                    string objectId = inkEl.Attribute("objectID")?.Value;
-                    string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
+                    double yOffset;
+                    if (alignTop)
+                    {
+                        yOffset = referenceY - cluster.GroupY;
+                    }
+                    else
+                    {
+                        // Bottom alignment: find cluster's bottom (max of PositionY + SizeHeight)
+                        double clusterBottom = double.MinValue;
+                        foreach (var pt in cluster.Points)
+                        {
+                            int idx = Array.IndexOf(objectIds, pt.ObjectId);
+                            if (idx >= 0 && idx < inkDrawingHeights.Length)
+                            {
+                                double bottom = inkDrawingYPositions[idx] + inkDrawingHeights[idx];
+                                if (bottom > clusterBottom) clusterBottom = bottom;
+                            }
+                        }
+                        yOffset = referenceY - clusterBottom;
+                    }
 
-                    if (string.IsNullOrEmpty(objectId))
-                        continue;
+                    Log($"  Cluster: GroupY={cluster.GroupY}, yOffset={yOffset}");
 
-                    var pos = inkEl.Element(ns + "Position");
-                    var size = inkEl.Element(ns + "Size");
-
-                    if (pos == null || size == null)
-                        continue;
-
-                    double inkX = double.Parse(pos.Attribute("x")?.Value ?? "0");
-                    double inkY = double.Parse(pos.Attribute("y")?.Value ?? "0");
-                    double inkHeight = double.Parse(size.Attribute("height")?.Value ?? "0");
-
-                    // Calculate target Y position based on alignment type
-                    // For top alignment: targetY = referenceY (align all tops to highest ink)
-                    // For bottom alignment: targetY = referenceY - inkHeight (align all bottoms to lowest ink)
-                    double targetY = alignTop ? referenceY : referenceY - inkHeight;
-
-                    // Calculate Y offset needed to move ink's TOP edge to targetY
-                    double yOffset = targetY - inkY;
-
-                    // Skip if no offset needed (same position as reference)
                     if (Math.Abs(yOffset) < 0.01)
                         continue;
 
-                    // Get binary data for this specific ink using GetBinaryPageContent
-                    OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
-                    if (string.IsNullOrEmpty(isfBase64))
+                    foreach (var pt in cluster.Points)
+                    {
+                        inkOffsets[pt.ObjectId] = yOffset;
+                        Log($"    ObjectId={pt.ObjectId}, yOffset={yOffset}");
+                    }
+                }
+
+                if (inkOffsets.Count == 0)
+                    return;
+
+                // Build modified ink elements - only update Position Y, keep ISF data unchanged
+                var inkXmlParts = new List<XElement>();
+                for (int i = 0; i < selectedInkElements.Count; i++)
+                {
+                    var inkEl = selectedInkElements[i];
+                    string objectId = inkEl.Attribute("objectID")?.Value;
+                    if (string.IsNullOrEmpty(objectId) || !inkOffsets.TryGetValue(objectId, out double yOffset))
                         continue;
 
-                    // Move the strokes by the offset
-                    string movedBase64 = InkDashedConverter.MoveStroke(isfBase64, 0, yOffset);
-                    if (string.IsNullOrEmpty(movedBase64))
+                    int idx = Array.IndexOf(objectIds, objectId);
+                    if (idx < 0 || string.IsNullOrEmpty(isfDataArray[idx]))
                         continue;
 
-                    // Build ink XML element with new Position (only Y changed), Size, and new Data
+                    double inkX = double.Parse(inkEl.Element(ns + "Position")?.Attribute("x")?.Value ?? "0");
+                    double inkY = inkDrawingYPositions[i];
+                    double targetY = inkY + yOffset;
+
+                    string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
+
                     var newPos = new XElement(ns + "Position",
                         new XAttribute("x", inkX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                         new XAttribute("y", targetY.ToString(System.Globalization.CultureInfo.InvariantCulture))
                     );
+
+                    var size = inkEl.Element(ns + "Size");
 
                     var inkXmlEl = new XElement(ns + "InkDrawing",
                         new XAttribute("objectID", objectId),
                         new XAttribute("lastModifiedTime", lastModified),
                         newPos,
                         size,
-                        new XElement(ns + "Data", movedBase64)
+                        new XElement(ns + "Data", isfDataArray[idx])
                     );
+
                     inkXmlParts.Add(inkXmlEl);
-                    alignedCount++;
                 }
 
-                if (alignedCount == 0)
-                {
+                if (inkXmlParts.Count == 0)
                     return;
-                }
 
-                // Step 4: Update page with partial XML (just the modified ink elements)
-                var pageEl = new XElement(ns + "Page",
-                    new XAttribute("ID", pageId)
-                );
-                foreach (var inkEl in inkXmlParts)
-                    pageEl.Add(inkEl);
-
-                var pageDoc = new XDocument(pageEl);
-                string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
-                OneNoteApplication.UpdatePageContent(pageXml);
+                Log($"ExecuteAlign: Updating page with {inkXmlParts.Count} ink elements");
+                UpdatePage(pageId, ns, inkXmlParts);
             }
             catch (Exception ex)
             {
                 Log($"ExecuteAlign ERROR: {ex}");
                 MessageBox.Show(string.Format(Strings.ErrorAlign, ex.Message));
             }
+        }
+
+        private void BuildModifiedInkXml(XElement inkEl, string[] objectIds, string[] isfDataArray, double yOffset, XNamespace ns, List<XElement> inkXmlParts)
+        {
+            string objectId = inkEl.Attribute("objectID")?.Value;
+            string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
+            var pos = inkEl.Element(ns + "Position");
+            var size = inkEl.Element(ns + "Size");
+
+            if (pos == null || size == null)
+                return;
+
+            double inkX = double.Parse(pos.Attribute("x")?.Value ?? "0");
+            double inkY = double.Parse(pos.Attribute("y")?.Value ?? "0");
+            double targetY = inkY + yOffset;
+
+            int idx = Array.IndexOf(objectIds, objectId);
+            if (idx < 0 || string.IsNullOrEmpty(isfDataArray[idx]))
+                return;
+
+            string movedBase64 = InkDashedConverter.MoveStroke(isfDataArray[idx], 0, yOffset);
+            if (string.IsNullOrEmpty(movedBase64))
+                return;
+
+            var newPos = new XElement(ns + "Position",
+                new XAttribute("x", inkX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                new XAttribute("y", targetY.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            );
+
+            var inkXmlEl = new XElement(ns + "InkDrawing",
+                new XAttribute("objectID", objectId),
+                new XAttribute("lastModifiedTime", lastModified),
+                newPos,
+                size,
+                new XElement(ns + "Data", movedBase64)
+            );
+            inkXmlParts.Add(inkXmlEl);
+        }
+
+        private void UpdatePage(string pageId, XNamespace ns, List<XElement> inkXmlParts)
+        {
+            var pageEl = new XElement(ns + "Page",
+                new XAttribute("ID", pageId)
+            );
+            foreach (var inkEl in inkXmlParts)
+                pageEl.Add(inkEl);
+
+            var pageDoc = new XDocument(pageEl);
+            string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
+            OneNoteApplication.UpdatePageContent(pageXml);
         }
 
         /// <summary>
