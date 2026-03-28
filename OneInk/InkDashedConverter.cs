@@ -964,6 +964,7 @@ namespace OneInk
             public double Height { get; set; }
             public double MaxY { get; set; }
             public int PointCount { get; set; }
+            public System.Collections.Generic.List<double> StrokeYs { get; set; } = new System.Collections.Generic.List<double>();
         }
 
         private class InkDrawingCluster
@@ -1011,6 +1012,7 @@ namespace OneInk
 
                     double minX = double.MaxValue, minY = double.MaxValue;
                     double maxX = double.MinValue, maxY = double.MinValue;
+                    var strokeYs = new System.Collections.Generic.List<double>();
 
                     foreach (Stroke s in ink.Strokes)
                     {
@@ -1019,10 +1021,8 @@ namespace OneInk
                         minY = System.Math.Min(minY, bbox.Y);
                         maxX = System.Math.Max(maxX, bbox.X + bbox.Width);
                         maxY = System.Math.Max(maxY, bbox.Y + bbox.Height);
+                        strokeYs.Add(bbox.Y);
                     }
-
-                    double isfHeight = maxY - minY;
-                    double bottomHeight = inkDrawingHeight > 0 ? (isfHeight + inkDrawingHeight) / 2 : isfHeight;
 
                     inkDrawingBounds.Add(new InkDrawingBounds
                     {
@@ -1030,9 +1030,10 @@ namespace OneInk
                         X = minX,
                         Y = inkDrawingY,
                         Width = maxX - minX,
-                        Height = isfHeight,
-                        MaxY = bottomHeight,
-                        PointCount = ink.Strokes.Count
+                        Height = inkDrawingHeight, // page-level height
+                        MaxY = inkDrawingY + inkDrawingHeight, // page-level bottom Y for alignment
+                        PointCount = ink.Strokes.Count,
+                        StrokeYs = strokeYs
                     });
                 }
                 finally
@@ -1043,6 +1044,49 @@ namespace OneInk
 
             if (inkDrawingBounds.Count == 0)
                 return new System.Collections.Generic.List<StrokeCluster>();
+
+            if (inkDrawingBounds.Count == 1 && inkDrawingBounds[0].StrokeYs.Count > 1)
+            {
+                // Single InkDrawing with multiple strokes - cluster by strokes
+                var strokeYs = inkDrawingBounds[0].StrokeYs;
+                var clusterResult = new System.Collections.Generic.List<StrokeCluster>();
+                var allPoints = new System.Collections.Generic.List<StrokeClusterPoint>();
+
+                for (int j = 0; j < strokeYs.Count; j++)
+                {
+                    allPoints.Add(new StrokeClusterPoint
+                    {
+                        X = inkDrawingBounds[0].X,
+                        Y = inkDrawingYPositions[0] + strokeYs[j], // page-level Y = PositionY + stroke internal Y
+                        Width = inkDrawingBounds[0].Width,
+                        Height = 0, // placeholder
+                        ObjectId = inkDrawingBounds[0].ObjectId + "_" + j
+                    });
+                }
+
+                // Simple clustering: group strokes by Y distance
+                double strokeThreshold = 50; // HIMETRIC
+                var used = new bool[allPoints.Count];
+                for (int i = 0; i < allPoints.Count; i++)
+                {
+                    if (used[i]) continue;
+                    var cluster = new StrokeCluster { Points = new System.Collections.Generic.List<StrokeClusterPoint>() };
+                    for (int j = i; j < allPoints.Count; j++)
+                    {
+                        if (used[j]) continue;
+                        if (cluster.Points.Count == 0 || System.Math.Abs(allPoints[j].Y - cluster.Points[0].Y) < strokeThreshold)
+                        {
+                            cluster.Points.Add(allPoints[j]);
+                            used[j] = true;
+                        }
+                    }
+                    CalculateClusterBounds(cluster);
+                    // For bottom alignment, use page-level bottom Y (PositionY + SizeHeight)
+                    cluster.GroupMaxY = inkDrawingYPositions[0] + inkDrawingHeights[0];
+                    clusterResult.Add(cluster);
+                }
+                return clusterResult;
+            }
 
             if (inkDrawingBounds.Count == 1)
             {
@@ -1074,7 +1118,7 @@ namespace OneInk
                 });
             }
 
-            double mergeThreshold = 2500;
+            double mergeThreshold = 40; // HIMETRIC - separates groups with ~70 Y gap
 
             while (clusters.Count > 1)
             {
@@ -1165,15 +1209,10 @@ namespace OneInk
 
         private static double BoundsDistance(InkDrawingBounds b1, InkDrawingBounds b2)
         {
-            double center1_x = b1.X + b1.Width / 2;
-            double center1_y = b1.Y + b1.Height / 2;
-            double center2_x = b2.X + b2.Width / 2;
-            double center2_y = b2.Y + b2.Height / 2;
-
-            double dx = center1_x - center2_x;
-            double dy = center1_y - center2_y;
-
-            return System.Math.Sqrt(dx * dx + dy * dy);
+            // For clustering, use the distance between the centers of the clusters.
+            // Since we only care about Y (vertical) position for alignment,
+            // use PositionY directly as the representative Y.
+            return System.Math.Abs(b1.Y - b2.Y);
         }
 
         private static InkDrawingBounds CalculateMergedBounds(System.Collections.Generic.List<InkDrawingBounds> bounds, System.Collections.Generic.List<int> indices)
@@ -1188,7 +1227,7 @@ namespace OneInk
                 minX = System.Math.Min(minX, bounds[idx].X);
                 minY = System.Math.Min(minY, bounds[idx].Y);
                 maxX = System.Math.Max(maxX, bounds[idx].X + bounds[idx].Width);
-                maxBottomY = System.Math.Max(maxBottomY, bounds[idx].Y + bounds[idx].MaxY);
+                maxBottomY = System.Math.Max(maxBottomY, bounds[idx].MaxY);
             }
 
             return new InkDrawingBounds

@@ -592,6 +592,12 @@ namespace OneInk
                 Log($"ExecuteAlign: alignTop={alignTop}, referenceY={referenceY}, clusters={clusters.Count}");
 
                 // Log all ink drawing positions
+                for (int i = 0; i < objectIds.Length; i++)
+                {
+                    Log($"  InkDrawing: ObjectId={objectIds[i]}, PositionY={inkDrawingYPositions[i]}, SizeHeight={inkDrawingHeights[i]}");
+                }
+
+                // Log cluster details
                 // Calculate offset for each object based on its cluster
                 var inkOffsets = new Dictionary<string, double>();
                 foreach (var cluster in clusters)
@@ -618,6 +624,10 @@ namespace OneInk
                     }
 
                     Log($"  Cluster: GroupY={cluster.GroupY}, yOffset={yOffset}");
+                    foreach (var pt in cluster.Points)
+                    {
+                        Log($"    ObjectId={pt.ObjectId}");
+                    }
 
                     if (Math.Abs(yOffset) < 0.01)
                         continue;
