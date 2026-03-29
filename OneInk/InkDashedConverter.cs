@@ -1118,7 +1118,9 @@ namespace OneInk
                 });
             }
 
-            double mergeThreshold = 40; // HIMETRIC - separates groups with ~70 Y gap
+            // Fixed threshold in HIMETRIC units (physical, DPI-independent)
+            // 1 HIMETRIC = 0.001 inch ≈ 0.0254mm
+            double mergeThreshold = 30; // HIMETRIC units (~0.75mm gap)
 
             while (clusters.Count > 1)
             {
@@ -1209,10 +1211,12 @@ namespace OneInk
 
         private static double BoundsDistance(InkDrawingBounds b1, InkDrawingBounds b2)
         {
-            // For clustering, use the distance between the centers of the clusters.
-            // Since we only care about Y (vertical) position for alignment,
-            // use PositionY directly as the representative Y.
-            return System.Math.Abs(b1.Y - b2.Y);
+            // Use Euclidean distance but normalize X to page-level scale.
+            // X is ISF internal (large), Y is page-level. We scale X down by
+            // assuming ISF is roughly 100x larger than page-level.
+            double dx = System.Math.Abs(b1.X - b2.X) / 100.0; // normalized X distance
+            double dy = System.Math.Abs(b1.Y - b2.Y); // page-level Y distance
+            return System.Math.Sqrt(dx * dx + dy * dy);
         }
 
         private static InkDrawingBounds CalculateMergedBounds(System.Collections.Generic.List<InkDrawingBounds> bounds, System.Collections.Generic.List<int> indices)
