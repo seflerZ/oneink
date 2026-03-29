@@ -55,7 +55,9 @@ namespace OneInk
         private static IRibbonUI _ribbon;
         private static int _selectedDensityIndex = 1; // default to medium
         private static int _selectedSmoothIndex = 0; // default to curve (0)
-        private static int _selectedAlignIndex = 0; // default to top (0), bottom (1)
+        private static int _selectedAlignIndex = 0; // default to top (0), bottom (1), left (2), right (3)
+
+        private enum AlignDirection { Top, Bottom, Left, Right }
 
         public AddIn()
         {
@@ -468,7 +470,7 @@ namespace OneInk
             }
         }
 
-        private void ExecuteAlign(bool alignTop)
+        private void ExecuteAlign(AlignDirection direction)
         {
             try
             {
@@ -550,6 +552,14 @@ namespace OneInk
                         .Select(e => double.Parse(e.Element(ns + "Size")?.Attribute("height")?.Value ?? "0"))
                         .ToArray();
 
+                var inkDrawingXPositions = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Position")?.Attribute("x")?.Value ?? "0"))
+                        .ToArray();
+
+                var inkDrawingWidths = selectedInkElements
+                        .Select(e => double.Parse(e.Element(ns + "Size")?.Attribute("width")?.Value ?? "0"))
+                        .ToArray();
+
                 var isfDataArray = new string[objectIds.Length];
                 for (int i = 0; i < objectIds.Length; i++)
                 {
@@ -569,100 +579,168 @@ namespace OneInk
 
                 Log($"ExecuteAlign: hierarchical clustering got {clusters.Count} clusters");
 
-                // Calculate reference Y based on alignment type and cluster bounds
-                double referenceY;
-                if (alignTop)
+                // Calculate reference and offsets based on alignment direction
+                double reference;
+                bool isHorizontal = direction == AlignDirection.Left || direction == AlignDirection.Right;
+
+                if (isHorizontal)
                 {
-                    // Top alignment: align all strokes' tops to the highest (smallest Y)
-                    referenceY = clusters.Min(c => c.GroupY);
+                    // Left/Right alignment
+                    if (direction == AlignDirection.Left)
+                    {
+                        // Left alignment: align all strokes' left edges to the leftmost (smallest X)
+                        // Use page-level PositionX, not GroupX (which is ISF internal)
+                        double minX = double.MaxValue;
+                        for (int i = 0; i < objectIds.Length; i++)
+                        {
+                            if (inkDrawingXPositions[i] < minX) minX = inkDrawingXPositions[i];
+                        }
+                        reference = minX;
+                    }
+                    else
+                    {
+                        // Right alignment: align all strokes' right edges to the rightmost
+                        // Right = PositionX + SizeWidth
+                        double maxRight = double.MinValue;
+                        for (int i = 0; i < objectIds.Length; i++)
+                        {
+                            double right = inkDrawingXPositions[i] + inkDrawingWidths[i];
+                            if (right > maxRight) maxRight = right;
+                        }
+                        reference = maxRight;
+                    }
                 }
                 else
                 {
-                    // Bottom alignment: align all strokes' bottoms to the lowest bottom
-                    // Bottom = PositionY + SizeHeight
-                    double maxBottom = double.MinValue;
-                    for (int i = 0; i < objectIds.Length; i++)
+                    // Top/Bottom alignment
+                    if (direction == AlignDirection.Top)
                     {
-                        double bottom = inkDrawingYPositions[i] + inkDrawingHeights[i];
-                        if (bottom > maxBottom) maxBottom = bottom;
+                        // Top alignment: align all strokes' tops to the highest (smallest Y)
+                        reference = clusters.Min(c => c.GroupY);
                     }
-                    referenceY = maxBottom;
+                    else
+                    {
+                        // Bottom alignment: align all strokes' bottoms to the lowest bottom
+                        double maxBottom = double.MinValue;
+                        for (int i = 0; i < objectIds.Length; i++)
+                        {
+                            double bottom = inkDrawingYPositions[i] + inkDrawingHeights[i];
+                            if (bottom > maxBottom) maxBottom = bottom;
+                        }
+                        reference = maxBottom;
+                    }
                 }
 
-                Log($"ExecuteAlign: alignTop={alignTop}, referenceY={referenceY}, clusters={clusters.Count}");
+                Log($"ExecuteAlign: direction={direction}, reference={reference}, clusters={clusters.Count}");
 
                 // Log all ink drawing positions
                 for (int i = 0; i < objectIds.Length; i++)
                 {
-                    Log($"  InkDrawing: ObjectId={objectIds[i]}, PositionY={inkDrawingYPositions[i]}, SizeHeight={inkDrawingHeights[i]}");
+                    Log($"  InkDrawing: ObjectId={objectIds[i]}, PositionX={inkDrawingXPositions[i]}, PositionY={inkDrawingYPositions[i]}, SizeW={inkDrawingWidths[i]}, SizeH={inkDrawingHeights[i]}");
                 }
 
-                // Log cluster details
                 // Calculate offset for each object based on its cluster
                 var inkOffsets = new Dictionary<string, double>();
                 foreach (var cluster in clusters)
                 {
-                    double yOffset;
-                    if (alignTop)
+                    double offset;
+                    if (isHorizontal)
                     {
-                        yOffset = referenceY - cluster.GroupY;
+                        if (direction == AlignDirection.Left)
+                        {
+                            // Find cluster's left edge using page-level PositionX
+                            double clusterLeft = double.MaxValue;
+                            foreach (var pt in cluster.Points)
+                            {
+                                int idx = Array.IndexOf(objectIds, pt.ObjectId);
+                                if (idx >= 0)
+                                {
+                                    if (inkDrawingXPositions[idx] < clusterLeft) clusterLeft = inkDrawingXPositions[idx];
+                                }
+                            }
+                            offset = reference - clusterLeft;
+                        }
+                        else
+                        {
+                            // Right alignment: find cluster's right edge (max of PositionX + SizeWidth)
+                            double clusterRight = double.MinValue;
+                            foreach (var pt in cluster.Points)
+                            {
+                                int idx = Array.IndexOf(objectIds, pt.ObjectId);
+                                if (idx >= 0 && idx < inkDrawingWidths.Length)
+                                {
+                                    double right = inkDrawingXPositions[idx] + inkDrawingWidths[idx];
+                                    if (right > clusterRight) clusterRight = right;
+                                }
+                            }
+                            offset = reference - clusterRight;
+                        }
+                        Log($"  Cluster: xOffset={offset}");
                     }
                     else
                     {
-                        // Bottom alignment: find cluster's bottom (max of PositionY + SizeHeight)
-                        double clusterBottom = double.MinValue;
-                        foreach (var pt in cluster.Points)
+                        if (direction == AlignDirection.Top)
                         {
-                            int idx = Array.IndexOf(objectIds, pt.ObjectId);
-                            if (idx >= 0 && idx < inkDrawingHeights.Length)
-                            {
-                                double bottom = inkDrawingYPositions[idx] + inkDrawingHeights[idx];
-                                if (bottom > clusterBottom) clusterBottom = bottom;
-                            }
+                            offset = reference - cluster.GroupY;
                         }
-                        yOffset = referenceY - clusterBottom;
+                        else
+                        {
+                            // Bottom alignment: find cluster's bottom (max of PositionY + SizeHeight)
+                            double clusterBottom = double.MinValue;
+                            foreach (var pt in cluster.Points)
+                            {
+                                int idx = Array.IndexOf(objectIds, pt.ObjectId);
+                                if (idx >= 0 && idx < inkDrawingHeights.Length)
+                                {
+                                    double bottom = inkDrawingYPositions[idx] + inkDrawingHeights[idx];
+                                    if (bottom > clusterBottom) clusterBottom = bottom;
+                                }
+                            }
+                            offset = reference - clusterBottom;
+                        }
+                        Log($"  Cluster: GroupY={cluster.GroupY}, yOffset={offset}");
                     }
 
-                    Log($"  Cluster: GroupY={cluster.GroupY}, yOffset={yOffset}");
                     foreach (var pt in cluster.Points)
                     {
                         Log($"    ObjectId={pt.ObjectId}");
                     }
 
-                    if (Math.Abs(yOffset) < 0.01)
+                    if (Math.Abs(offset) < 0.01)
                         continue;
 
                     foreach (var pt in cluster.Points)
                     {
-                        inkOffsets[pt.ObjectId] = yOffset;
-                        Log($"    ObjectId={pt.ObjectId}, yOffset={yOffset}");
+                        inkOffsets[pt.ObjectId] = offset;
+                        Log($"    ObjectId={pt.ObjectId}, offset={offset}");
                     }
                 }
 
                 if (inkOffsets.Count == 0)
                     return;
 
-                // Build modified ink elements - only update Position Y, keep ISF data unchanged
+                // Build modified ink elements - update Position X or Y based on direction, keep ISF data unchanged
                 var inkXmlParts = new List<XElement>();
                 for (int i = 0; i < selectedInkElements.Count; i++)
                 {
                     var inkEl = selectedInkElements[i];
                     string objectId = inkEl.Attribute("objectID")?.Value;
-                    if (string.IsNullOrEmpty(objectId) || !inkOffsets.TryGetValue(objectId, out double yOffset))
+                    if (string.IsNullOrEmpty(objectId) || !inkOffsets.TryGetValue(objectId, out double offset))
                         continue;
 
                     int idx = Array.IndexOf(objectIds, objectId);
                     if (idx < 0 || string.IsNullOrEmpty(isfDataArray[idx]))
                         continue;
 
-                    double inkX = double.Parse(inkEl.Element(ns + "Position")?.Attribute("x")?.Value ?? "0");
+                    double inkX = inkDrawingXPositions[i];
                     double inkY = inkDrawingYPositions[i];
-                    double targetY = inkY + yOffset;
+                    double targetX = isHorizontal ? inkX + offset : inkX;
+                    double targetY = isHorizontal ? inkY : inkY + offset;
 
                     string lastModified = inkEl.Attribute("lastModifiedTime")?.Value ?? "";
 
                     var newPos = new XElement(ns + "Position",
-                        new XAttribute("x", inkX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new XAttribute("x", targetX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                         new XAttribute("y", targetY.ToString(System.Globalization.CultureInfo.InvariantCulture))
                     );
 
@@ -963,7 +1041,10 @@ namespace OneInk
                     case "buttonDeleteByColor": tip = Strings.ButtonDeleteByColorScreentip; break;
                     case "buttonToDashed": tip = Strings.ButtonToDashedScreentip; break;
                     case "buttonSmooth": tip = Strings.ButtonSmoothCurveScreentip; break;
-                    case "buttonAlign": tip = _selectedAlignIndex == 0 ? Strings.ButtonAlignTopScreentip : Strings.ButtonAlignBottomScreentip; break;
+                    case "buttonAlign":
+                        string[] alignScreentips = { Strings.ButtonAlignTopScreentip, Strings.ButtonAlignBottomScreentip, Strings.ButtonAlignLeftScreentip, Strings.ButtonAlignRightScreentip };
+                        tip = alignScreentips[_selectedAlignIndex];
+                        break;
                     default: tip = null; break;
                 }
                 return tip;
@@ -1035,7 +1116,7 @@ namespace OneInk
         /// </summary>
         public void AlignInkButtonClicked(IRibbonControl control)
         {
-            ExecuteAlign(_selectedAlignIndex == 0); // true = align top, false = align bottom
+            ExecuteAlign((AlignDirection)_selectedAlignIndex);
         }
 
         /// <summary>
@@ -1060,6 +1141,28 @@ namespace OneInk
                 _ribbon.InvalidateControl("buttonAlign");
         }
 
+        /// <summary>
+        /// Called when Align Left menu item is clicked.
+        /// </summary>
+        public void OnMenuAlignLeftClicked(IRibbonControl control)
+        {
+            _selectedAlignIndex = 2;
+            Log($"OnMenuAlignLeftClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonAlign");
+        }
+
+        /// <summary>
+        /// Called when Align Right menu item is clicked.
+        /// </summary>
+        public void OnMenuAlignRightClicked(IRibbonControl control)
+        {
+            _selectedAlignIndex = 3;
+            Log($"OnMenuAlignRightClicked");
+            if (_ribbon != null)
+                _ribbon.InvalidateControl("buttonAlign");
+        }
+
         private static string GetCurrentDashedLabel()
         {
             string densityName;
@@ -1080,7 +1183,8 @@ namespace OneInk
 
         private static string GetCurrentAlignLabel()
         {
-            string alignName = _selectedAlignIndex == 0 ? Strings.ButtonAlignTopLabel : Strings.ButtonAlignBottomLabel;
+            string[] alignNames = { Strings.ButtonAlignTopLabel, Strings.ButtonAlignBottomLabel, Strings.ButtonAlignLeftLabel, Strings.ButtonAlignRightLabel };
+            string alignName = alignNames[_selectedAlignIndex];
             return $"{Strings.ButtonAlignLabel}（{alignName}）";
         }
 
@@ -1113,8 +1217,8 @@ namespace OneInk
         /// </summary>
         public IStream GetAlignImage(IRibbonControl control)
         {
-            string alignImage = _selectedAlignIndex == 0 ? "AlignTop.png" : "AlignBottom.png";
-            return GetImage(alignImage);
+            string[] alignImages = { "AlignTop.png", "AlignBottom.png", "AlignLeft.png", "AlignRight.png" };
+            return GetImage(alignImages[_selectedAlignIndex]);
         }
 
         /// <summary>

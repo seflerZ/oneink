@@ -93,13 +93,13 @@ After installation, open OneNote. A **OneInk** tab appears in the ribbon with to
   - If ink is selected (lasso selection), only selected ink is smoothed
 - **Align Ink** (split button):
   - Main button label shows current mode (e.g., `对齐（顶边对齐）`)
-  - Click the dropdown arrow to select mode: **顶边对齐** (align top) or **底边对齐** (align bottom)
+  - Click the dropdown arrow to select mode: **顶边对齐** (align top), **底边对齐** (align bottom), **左边对齐** (align left), or **右边对齐** (align right)
   - Each mode has its own icon; clicking a menu item updates the button label and icon
   - Click the main button to align ink with the selected mode
   - Uses intelligent clustering to group strokes that form logical shapes (e.g., hand-drawn cube)
-  - Align Top: each cluster aligns to the highest stroke's top edge within that cluster
-  - Align Bottom: each cluster aligns to the lowest stroke's bottom edge within that cluster
-  - Strokes far apart horizontally are treated as separate clusters for better alignment
+  - Top/Bottom: each cluster aligns to the highest/lowest stroke's edge within that cluster
+  - Left/Right: each cluster aligns to the leftmost/rightmost stroke's edge within that cluster
+  - Strokes far apart are treated as separate clusters for better alignment
 
 ## Project Structure
 

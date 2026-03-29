@@ -86,6 +86,8 @@
                         &lt;menu&gt;
                             &lt;button id="menuItemAlignTop" label="顶边对齐" onAction="OnMenuAlignTopClicked" image="AlignTop.png"/&gt;
                             &lt;button id="menuItemAlignBottom" label="底边对齐" onAction="OnMenuAlignBottomClicked" image="AlignBottom.png"/&gt;
+                            &lt;button id="menuItemAlignLeft" label="左边对齐" onAction="OnMenuAlignLeftClicked" image="AlignLeft.png"/&gt;
+                            &lt;button id="menuItemAlignRight" label="右边对齐" onAction="OnMenuAlignRightClicked" image="AlignRight.png"/&gt;
                         &lt;/menu&gt;
                     &lt;/splitButton&gt;
                 &lt;/group&gt;

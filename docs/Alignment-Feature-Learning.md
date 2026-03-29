@@ -1,13 +1,13 @@
 # Alignment Feature - Key Learnings
 
 ## Overview
-Implemented top and bottom alignment for ink strokes in OneNote, with intelligent clustering to keep related strokes together.
+Implemented top, bottom, left, and right alignment for ink strokes in OneNote, with intelligent clustering to keep related strokes together.
 
 ## Key Findings
 
 ### 1. OneNote Coordinate System
-- **Position Y**: Page-level Y coordinate of InkDrawing element (small values, e.g., 150-600 HIMETRIC)
-- **Size Height**: Height of the InkDrawing bounding box from the XML
+- **Position X/Y**: Page-level X/Y coordinate of InkDrawing element (small values, e.g., 150-600 HIMETRIC)
+- **Size Width/Height**: Width/Height of the InkDrawing bounding box from the XML
 - **ISF Internal Coordinates**: Internal stroke coordinates within the ISF data (large values, e.g., 5000-20000)
 - **X coordinate**: ISF internal (large values), different scale from page-level Y
 
@@ -22,7 +22,15 @@ These are **different coordinate systems** that cannot be mixed!
 - Use Size Height (not ISF internal bounding box height)
 - ISF internal coordinates contain too much padding/margin and don't scale correctly with Position Y
 
-### 4. Clustering Algorithm
+### 4. Left Alignment
+- Use **Position X** directly as the left edge
+- Align all strokes to the minimum Position X
+
+### 5. Right Alignment
+- Right edge = **Position X + Size Width**
+- Use Size Width from XML for right alignment
+
+### 6. Clustering Algorithm
 - Used **Hierarchical Clustering (single-linkage)** instead of K-Means/DBSCAN/OPTICS
 - Each InkDrawing is treated as an **atomic unit** - all strokes within stay together
 - **Fixed threshold: 30 HIMETRIC** (DPI-independent, physical units)
@@ -33,24 +41,40 @@ These are **different coordinate systems** that cannot be mixed!
   - X is ISF internal (large), divided by ~100 to normalize to page-level scale
   - Y is page-level, used directly
 
-### 5. Implementation Details
+### 7. Implementation Details
 
 ```
 ClusterInkDrawings:
 - Groups strokes by InkDrawing first
 - Calculates collective bounding box for each InkDrawing
 - Uses hierarchical clustering to merge nearby InkDrawings
-- Returns clusters with GroupY (top) and GroupMaxY (bottom for alignment)
+- Returns clusters with GroupX/GroupY (top-left) and GroupMaxX/GroupMaxY (bottom-right)
 ```
 
-### 6. Bottom Alignment Formula
+### 8. Alignment Formulas
 ```
-referenceY = max(PositionY + SizeHeight)  // lowest bottom
-yOffset = referenceY - (PositionY + SizeHeight)  // per stroke
+// Top Alignment
+referenceY = min(PositionY)
+yOffset = referenceY - PositionY
 newPositionY = PositionY + yOffset
+
+// Bottom Alignment
+referenceY = max(PositionY + SizeHeight)
+yOffset = referenceY - (PositionY + SizeHeight)
+newPositionY = PositionY + yOffset
+
+// Left Alignment
+referenceX = min(PositionX)
+xOffset = referenceX - PositionX
+newPositionX = PositionX + xOffset
+
+// Right Alignment
+referenceX = max(PositionX + SizeWidth)
+xOffset = referenceX - (PositionX + SizeWidth)
+newPositionX = PositionX + xOffset
 ```
 
-### 7. Single InkDrawing with Multiple Strokes
+### 9. Single InkDrawing with Multiple Strokes
 When OneNote merges multiple strokes into one InkDrawing (e.g., drawn without lifting pen), each stroke's Y is tracked via `StrokeYs` list for proper clustering.
 
 ## Files Modified

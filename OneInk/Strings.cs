@@ -49,6 +49,8 @@ namespace OneInk
         internal static string ButtonAlignLabel => IsChinese ? "对齐" : "Align";
         internal static string ButtonAlignTopLabel => IsChinese ? "顶边对齐" : "Align Top";
         internal static string ButtonAlignBottomLabel => IsChinese ? "底边对齐" : "Align Bottom";
+        internal static string ButtonAlignLeftLabel => IsChinese ? "左边对齐" : "Align Left";
+        internal static string ButtonAlignRightLabel => IsChinese ? "右边对齐" : "Align Right";
         internal static string ButtonClearInkScreentip => IsChinese ? "删除所选区域（或整页）的所有墨迹" : "Remove ink strokes from selection or entire page";
         internal static string ButtonDeleteByColorScreentip => IsChinese ? "按所选颜色删除所选区域（或整页）的墨迹" : "Delete ink strokes by color from selection or entire page";
         internal static string ButtonToDashedScreentip => IsChinese ? "将墨迹转换为虚线样式" : "Convert ink strokes to dashed lines";
@@ -56,6 +58,8 @@ namespace OneInk
         internal static string ButtonSmoothPolyScreentip => IsChinese ? "将墨迹转换为保留转角的折线" : "Convert ink strokes to simplified polylines preserving corners";
         internal static string ButtonAlignTopScreentip => IsChinese ? "将所选墨迹顶边对齐到第一个所选墨迹" : "Align top edges of selected ink to the first selected ink";
         internal static string ButtonAlignBottomScreentip => IsChinese ? "将所选墨迹底边对齐到第一个所选墨迹" : "Align bottom edges of selected ink to the first selected ink";
+        internal static string ButtonAlignLeftScreentip => IsChinese ? "将所选墨迹左边对齐到第一个所选墨迹" : "Align left edges of selected ink to the first selected ink";
+        internal static string ButtonAlignRightScreentip => IsChinese ? "将所选墨迹右边对齐到第一个所选墨迹" : "Align right edges of selected ink to the first selected ink";
         internal static string ButtonDenseScreentip => IsChinese ? "密集虚线" : "Dense dashed lines";
         internal static string ButtonSparseScreentip => IsChinese ? "稀疏虚线" : "Sparse dashed lines";
 

@@ -1121,7 +1121,7 @@ namespace OneInk
 
             // Fixed threshold in HIMETRIC units (physical, DPI-independent)
             // 1 HIMETRIC = 0.001 inch ≈ 0.0254mm
-            double mergeThreshold = 30; // HIMETRIC units (~0.75mm gap)
+            double mergeThreshold = 20; // HIMETRIC units (~0.5mm gap)
 
             while (clusters.Count > 1)
             {
