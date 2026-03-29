@@ -9,6 +9,7 @@ Implemented top and bottom alignment for ink strokes in OneNote, with intelligen
 - **Position Y**: Page-level Y coordinate of InkDrawing element (small values, e.g., 150-600 HIMETRIC)
 - **Size Height**: Height of the InkDrawing bounding box from the XML
 - **ISF Internal Coordinates**: Internal stroke coordinates within the ISF data (large values, e.g., 5000-20000)
+- **X coordinate**: ISF internal (large values), different scale from page-level Y
 
 These are **different coordinate systems** that cannot be mixed!
 
@@ -24,8 +25,13 @@ These are **different coordinate systems** that cannot be mixed!
 ### 4. Clustering Algorithm
 - Used **Hierarchical Clustering (single-linkage)** instead of K-Means/DBSCAN/OPTICS
 - Each InkDrawing is treated as an **atomic unit** - all strokes within stay together
-- Distance threshold: **40 HIMETRIC** (in page-level Y coordinates)
-- **Important**: Distance calculation uses **Y coordinate only**, not Euclidean distance
+- **Fixed threshold: 30 HIMETRIC** (DPI-independent, physical units)
+- **Distance calculation**: Euclidean distance with X normalized to page-level scale:
+  ```
+  distance = sqrt((dx/100)^2 + dy^2)
+  ```
+  - X is ISF internal (large), divided by ~100 to normalize to page-level scale
+  - Y is page-level, used directly
 
 ### 5. Implementation Details
 
@@ -62,22 +68,24 @@ When OneNote merges multiple strokes into one InkDrawing (e.g., drawn without li
 **Wrong**: Using ISF internal `maxY - minY` for bottom calculation
 **Correct**: Use Size Height from XML for bottom alignment
 
-### Mistake 3: Overlapping Clusters
-**Problem**: When bounding boxes overlap, single-linkage distance returns 0, causing immediate merge
-**Solution**: Always use center-point Euclidean distance, never return 0 for overlap
-
-### Mistake 4: Using Euclidean Distance with Mixed Coordinates
-**Problem**: Using `sqrt(dx^2 + dy^2)` where X is ISF internal (large) and Y is page-level (small) causes X to dominate distance calculation, making clustering useless
-
-**Correct**: Use Y distance only: `abs(b1.Y - b2.Y)` since X coordinate scales differently between ISF and page-level
-
-### Mistake 5: Double Counting Y in MaxY Calculation
+### Mistake 3: Double Counting Y in MaxY Calculation
 **Problem**: In `CalculateMergedBounds`, using `bounds[idx].Y + bounds[idx].MaxY` where MaxY already equals `inkDrawingY + inkDrawingHeight`
 
 **Correct**: Use `bounds[idx].MaxY` directly since it already contains the page-level bottom Y
+
+### Mistake 4: Using Y-Only Distance
+**Problem**: Only considering Y distance, ignoring X. Causes strokes far apart horizontally but close vertically to merge incorrectly.
+
+**Correct**: Use Euclidean distance with X normalized: `sqrt((dx/100)^2 + dy^2)`
+
+### Mistake 5: Dynamic Threshold Based on Gap
+**Problem**: Using `maxGap * 0.6` or similar ratios fails across different DPI settings because the actual gaps vary.
+
+**Correct**: Use fixed HIMETRIC threshold (30) since HIMETRIC is a physical unit, DPI-independent.
 
 ## Debugging Tips
 - Use `Log()` to output Position Y, Size Height, GroupY, GroupMaxY for each stroke
 - Check if offset values are reasonable (typically < 1000 HIMETRIC for small adjustments)
 - If strokes fly off screen, likely mixing coordinate systems
-- If all strokes merge into one cluster despite being far apart, check if distance calculation is using mixed coordinate systems
+- If all strokes merge into one cluster despite being far apart, check distance calculation
+- Compare logs between computers to identify coordinate system differences

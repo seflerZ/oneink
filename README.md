@@ -96,9 +96,10 @@ After installation, open OneNote. A **OneInk** tab appears in the ribbon with to
   - Click the dropdown arrow to select mode: **顶边对齐** (align top) or **底边对齐** (align bottom)
   - Each mode has its own icon; clicking a menu item updates the button label and icon
   - Click the main button to align ink with the selected mode
-  - Align Top aligns all selected ink strokes to the highest stroke's top edge
-  - Align Bottom aligns all selected ink strokes to the lowest stroke's bottom edge
-  - Requires at least 2 ink strokes to be selected (lasso selection)
+  - Uses intelligent clustering to group strokes that form logical shapes (e.g., hand-drawn cube)
+  - Align Top: each cluster aligns to the highest stroke's top edge within that cluster
+  - Align Bottom: each cluster aligns to the lowest stroke's bottom edge within that cluster
+  - Strokes far apart horizontally are treated as separate clusters for better alignment
 
 ## Project Structure
 
@@ -135,6 +136,7 @@ OneInk/
 - Ribbon `dropDown` `onAction` is known to not fire reliably in OneNote — use separate `button` elements or `splitButton` with `menu` instead
 - **Smooth Curve**: Chaikin's corner-cutting algorithm (3 iterations) produces C^1 continuous smooth curves
 - **Smooth Polyline**: Ramer-Douglas-Peucker algorithm (epsilon=500 HIMETRIC ≈ 12.7mm) simplifies strokes to straight segments
+- **Align Ink**: Hierarchical clustering (single-linkage) groups strokes by position; distance threshold is 30 HIMETRIC; uses Euclidean distance with X normalized to page-level scale (`sqrt((dx/100)^2 + dy^2)`)
 
 ## License
 
