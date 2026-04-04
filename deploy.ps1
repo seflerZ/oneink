@@ -92,50 +92,83 @@ if ($Mode -eq "Production") {
 } else {
     # ===================== Dev =====================
     # Build output dir: OneInk\bin\x64\Release\
-    Write-Host "[1/3] Building OneInk..." -ForegroundColor Yellow
+    Write-Host "[1/4] Building OneInk..." -ForegroundColor Yellow
     & $Global:MSBuildPath $Global:ProjectFile /p:Configuration=Release /p:Platform=$Platform /t:Rebuild /v:m | Out-Null
     if ($LASTEXITCODE -ne 0) { Write-Host "[ERROR] Build failed" -ForegroundColor Red; exit 1 }
     Write-Host "[OK] Build completed" -ForegroundColor Green
 
     $BuildDir = Join-Path (Split-Path $Global:ProjectFile) "bin\$Platform\Release"
 
-    Write-Host "[2/3] Registering from build dir: $BuildDir" -ForegroundColor Yellow
+    # Register DLL
+    Write-Host "[2/4] Registering DLL: $BuildDir\OneInk.dll" -ForegroundColor Yellow
+
+    $RegAsm = if ($Platform -eq "x86") { $Global:RegAsmX86 } elseif ($Platform -eq "arm64") { $Global:RegAsmARM64 } else { $Global:RegAsmX64 }
+    $dllPath = "$BuildDir\OneInk.dll"
 
     # Clean HKLM CLSID/AppID (best effort - may need admin)
-    $hklmClsId = "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
-    $hklmAppId = "HKLM:\SOFTWARE\Classes\AppID\$Global:AddInAppID"
     try {
+        $hklmClsId = "HKLM:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
+        $hklmAppId = "HKLM:\SOFTWARE\Classes\AppID\$Global:AddInAppID"
         if (Test-Path $hklmClsId) { Remove-Item $hklmClsId -Recurse -Force -EA SilentlyContinue }
         if (Test-Path $hklmAppId) { Remove-Item $hklmAppId -Recurse -Force -EA SilentlyContinue }
     } catch { }
 
-    # HKCU: AppID with DllSurrogate
-    New-Item -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Force | Out-Null
-    Set-ItemProperty -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Name DllSurrogate -Value ""
+    # Run regasm to register HKCR entries (requires admin)
+    # First unregister any existing registration
+    & $RegAsm /unregister $dllPath 2>$null
+    $regasmScript = "$env:TEMP\OneInk_regasm_$PID.ps1"
+    @"
+`$dll = "$dllPath"
+`$regasm = "$RegAsm"
+& `$regasm /codebase /tlb `$dll
+"@ | Out-File -FilePath $regasmScript -Encoding UTF8
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = "-ExecutionPolicy Bypass -NoProfile -File `"$regasmScript`""
+    $psi.Verb = "RunAs"
+    $psi.UseShellExecute = $true
+    [System.Diagnostics.Process]::Start($psi) | Out-Null
+    # Wait for elevated process to finish
+    Start-Sleep -Seconds 3
+    Remove-Item $regasmScript -Force -EA SilentlyContinue
 
-    # HKCU: CLSID with InprocServer32 pointing to mscoree.dll + CodeBase
+    # HKCU: AppID with DllSurrogate (fallback)
+    New-Item -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Force | Out-Null
+    Set-ItemProperty -Path "HKCU:\SOFTWARE\Classes\AppID\$Global:AddInAppID" -Name DllSurrogate -Value "" -ErrorAction SilentlyContinue
+
+    # HKCU: CLSID with InprocServer32 (fallback)
     $clsidPath = "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID"
     New-Item -Path $clsidPath -Force | Out-Null
-    Set-ItemProperty -Path $clsidPath -Name AppID -Value $Global:AddInAppID
-
+    Set-ItemProperty -Path $clsidPath -Name AppID -Value $Global:AddInAppID -ErrorAction SilentlyContinue
     $inprocPath = "$clsidPath\InprocServer32"
     New-Item -Path $inprocPath -Force | Out-Null
-    Set-ItemProperty -Path $inprocPath -Name "(Default)" -Value "mscoree.dll"
-    Set-ItemProperty -Path $inprocPath -Name ThreadingModel -Value "Both"
-    Set-ItemProperty -Path $inprocPath -Name CodeBase -Value "file:///$($BuildDir.Replace('\', '/'))/OneInk.dll"
+    Set-ItemProperty -Path $inprocPath -Name "(Default)" -Value "mscoree.dll" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $inprocPath -Name ThreadingModel -Value "Both" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $inprocPath -Name CodeBase -Value "file:///$($BuildDir.Replace('\', '/'))/OneInk.dll" -ErrorAction SilentlyContinue
 
     # HKCU AddIn entry (LoadBehavior=3)
     $addinRegPath = "HKCU:\SOFTWARE\Microsoft\Office\OneNote\AddIns\OneInk.AddIn"
     if (-not (Test-Path $addinRegPath)) { New-Item -Path $addinRegPath -Force | Out-Null }
-    Set-ItemProperty -Path $addinRegPath -Name LoadBehavior -Value 3 -Type DWord
+    Set-ItemProperty -Path $addinRegPath -Name LoadBehavior -Value 3 -Type DWord -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $addinRegPath -Name FriendlyName -Value "OneInk" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $addinRegPath -Name Description -Value "OneInk - OneNote Ink Operations" -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $addinRegPath -Name CommandLineSafe -Value 1 -Type DWord -ErrorAction SilentlyContinue
+
     Write-Host "[OK]" -ForegroundColor Green
 
-    Write-Host "[3/3] Verification..." -ForegroundColor Yellow
-    $hkcuCodeBase = (Get-ItemProperty "HKCU:\SOFTWARE\Classes\CLSID\$Global:AddInCLSID\InprocServer32" 'CodeBase' -EA SilentlyContinue).CodeBase
+    Write-Host "[3/4] Verification..." -ForegroundColor Yellow
+    $hkcrInproc = (Get-ItemProperty "HKCR:\CLSID\$Global:AddInCLSID\InprocServer32" -EA SilentlyContinue)
     $hkcuLB = (Get-ItemProperty $addinRegPath 'LoadBehavior' -EA SilentlyContinue).LoadBehavior
-    Write-Host "  HKCU CodeBase : $hkcuCodeBase" -ForegroundColor $(if ($hkcuCodeBase -like "*\bin\$Platform\Release*") { "Green" } else { "Yellow" })
+    if ($hkcrInproc.Class) {
+        Write-Host "  HKCR InprocServer32: Class=$(($hkcrInproc.Class))" -ForegroundColor Green
+    } else {
+        Write-Host "  HKCR InprocServer32: Class=NOT SET (may need admin)" -ForegroundColor Yellow
+    }
     Write-Host "  HKCU LoadBehavior: $hkcuLB" -ForegroundColor $(if ($hkcuLB -eq 3) { "Green" } else { "Red" })
     Write-Host "[OK] Dev deployment complete!" -ForegroundColor Green
+
+    Write-Host "[4/4] Note: If HKCR is incomplete, restart PowerShell as Admin and run:" -ForegroundColor Yellow
+    Write-Host "  regasm `"$dllPath`" /codebase /tlb" -ForegroundColor Cyan
 }
 
 Write-Host

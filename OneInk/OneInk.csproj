@@ -121,6 +121,7 @@
     <Compile Include="Strings.cs" />
     <Compile Include="InkColorExtractor.cs" />
     <Compile Include="InkDashedConverter.cs" />
+    <Compile Include="InkAlignmentCluster.cs" />
     <Compile Include="ReadOnlyStream.cs" />
     <Compile Include="BitmapExtensions.cs" />
     <Compile Include="AddIn.cs" />

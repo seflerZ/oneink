@@ -99,7 +99,7 @@ namespace OneInk
         /// <summary>
         /// Load ISF data into an Ink object. Handles ZLIB compression and 0x00 prefix.
         /// </summary>
-        private static Ink LoadIsf(byte[] isfData, out byte[] remaining)
+        internal static Ink LoadIsf(byte[] isfData, out byte[] remaining)
         {
             remaining = isfData;
             byte[] data = isfData;
@@ -714,7 +714,7 @@ namespace OneInk
             return sg;
         }
 
-        private static List<Point> GetStrokePoints(Stroke stroke)
+        internal static List<Point> GetStrokePoints(Stroke stroke)
         {
             try
             {
@@ -774,7 +774,7 @@ namespace OneInk
             return result;
         }
 
-        private static List<Point> ResampleStroke(Point[] pts, int numPoints)
+        internal static List<Point> ResampleStroke(Point[] pts, int numPoints)
         {
             if (pts == null || pts.Length < 2)
                 return new List<Point>(pts ?? new Point[0]);

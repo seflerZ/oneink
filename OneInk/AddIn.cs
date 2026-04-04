@@ -568,8 +568,8 @@ namespace OneInk
                 }
 
                 // Calculate collective bounding box of all selected strokes
-                // Use hierarchical clustering at InkDrawing level to keep each InkDrawing atomic
-                var clusters = InkDashedConverter.ClusterInkDrawings(isfDataArray, objectIds, inkDrawingYPositions, inkDrawingHeights);
+                // Use point-based connectivity clustering to group strokes belonging to the same shape
+                var clusters = InkAlignmentCluster.ClusterStrokesByConnectivity(isfDataArray, objectIds, inkDrawingXPositions, inkDrawingYPositions, inkDrawingWidths, inkDrawingHeights, 500.0, 20.0);
 
                 if (clusters.Count == 0)
                 {
@@ -616,7 +616,12 @@ namespace OneInk
                     if (direction == AlignDirection.Top)
                     {
                         // Top alignment: align all strokes' tops to the highest (smallest Y)
-                        reference = clusters.Min(c => c.GroupY);
+                        double minTop = double.MaxValue;
+                        for (int i = 0; i < objectIds.Length; i++)
+                        {
+                            if (inkDrawingYPositions[i] < minTop) minTop = inkDrawingYPositions[i];
+                        }
+                        reference = minTop;
                     }
                     else
                     {
@@ -681,7 +686,17 @@ namespace OneInk
                     {
                         if (direction == AlignDirection.Top)
                         {
-                            offset = reference - cluster.GroupY;
+                            // Find cluster's top edge using page-level PositionY
+                            double clusterTop = double.MaxValue;
+                            foreach (var pt in cluster.Points)
+                            {
+                                int idx = Array.IndexOf(objectIds, pt.ObjectId);
+                                if (idx >= 0)
+                                {
+                                    if (inkDrawingYPositions[idx] < clusterTop) clusterTop = inkDrawingYPositions[idx];
+                                }
+                            }
+                            offset = reference - clusterTop;
                         }
                         else
                         {
