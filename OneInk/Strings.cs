@@ -36,6 +36,18 @@ namespace OneInk
         internal static string ErrorSmooth => IsChinese ? "平滑墨迹时出错：{0}" : "Error smoothing ink: {0}";
         internal static string ErrorAlign => IsChinese ? "对齐墨迹时出错：{0}" : "Error aligning ink: {0}";
         internal static string DashedSuccess => IsChinese ? "已成功转换 {0} 个墨迹为虚线样式。" : "Converted {0} ink stroke(s) to dashed style.";
+        internal static string PartialSelectionSplit => IsChinese
+            ? "检测到只有一个墨迹容器，需要拆分后才能操作，是否拆分？"
+            : "Only one ink container detected. It needs to be split before operation. Do you want to split?";
+        internal static string PartialSelectionSplitTitle => IsChinese ? "拆分确认" : "Split Confirmation";
+        internal static string PartialSelectionComplete => IsChinese
+            ? "拆分完成，请重新选择墨迹进行操作。"
+            : "Split complete. Please reselect the ink to proceed.";
+        internal static string PartialSelectionCompleteTitle => IsChinese ? "提示" : "Information";
+        internal static string PartialSelectionFailed => IsChinese
+            ? "拆分失败，容器不可再拆。"
+            : "Split failed. The container cannot be split further.";
+        internal static string PartialSelectionFailedTitle => IsChinese ? "拆分失败" : "Split Failed";
 
         // Ribbon
         internal static string RibbonTabLabel => IsChinese ? "OneInk" : "OneInk";

@@ -20,6 +20,18 @@ using Application = Microsoft.Office.Interop.OneNote.Application;
 using IRibbonControl = Microsoft.Office.Core.IRibbonControl;
 using IStream = System.Runtime.InteropServices.ComTypes.IStream;
 
+// Win32 APIs for window management
+internal static class Win32Api
+{
+    [DllImport("user32.dll")]
+    internal static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    internal static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    internal const int SW_RESTORE = 9;
+}
+
 #pragma warning disable CS3003 // Type is not CLS-compliant
 
 namespace OneInk
@@ -185,6 +197,10 @@ namespace OneInk
                 );
                 bool hasSelection = selectedObjectIds.Count > 0;
 
+                // Check for partial selection - split merged InkDrawings if needed, then return
+                if (CheckAndHandlePartialSelection(docSel, pageId, selSettings, ns, "ClearInk"))
+                    return;
+
                 // Step 2: Get all ink object IDs using piBasic (fast ~20ms, no binary data)
                 OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
 
@@ -270,6 +286,10 @@ namespace OneInk
                           .Select(e => e.Attribute("objectID")?.Value ?? "")
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
+
+                // Check for partial selection - split merged InkDrawings if needed, then return
+                if (CheckAndHandlePartialSelection(docSel, pageId, selSettings, ns, "ToDashed"))
+                    return;
 
                 if (selectedObjectIds.Count == 0)
                 {
@@ -385,6 +405,10 @@ namespace OneInk
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
 
+                // Check for partial selection - split merged InkDrawings if needed, then return
+                if (CheckAndHandlePartialSelection(docSel, pageId, selSettings, ns, "Smooth"))
+                    return;
+
                 if (selectedObjectIds.Count == 0)
                 {
                     try
@@ -470,6 +494,234 @@ namespace OneInk
             }
         }
 
+        /// <summary>
+        /// <summary>
+        /// Checks for partial selection and handles it by splitting merged InkDrawings.
+        /// Returns true if any partial selection was found and handled (caller should return).
+        /// </summary>
+        private bool CheckAndHandlePartialSelection(XDocument docSel, string pageId, System.Xml.XmlReaderSettings selSettings, XNamespace ns, string operationName)
+        {
+            // Check for partial selection - if any InkDrawing is selected="partial", split it and return
+            var partialInkElements = docSel.Descendants(ns + "InkDrawing")
+                .Where(e => e.Attribute("selected")?.Value == "partial")
+                .ToList();
+
+            if (partialInkElements.Count == 0)
+                return false;
+
+            Log($"CheckAndHandlePartialSelection: Detected {partialInkElements.Count} partial selection(s) during {operationName}");
+
+            // Ask user if they want to split
+            DialogResult result;
+            try
+            {
+                var window = OneNoteApplication.Windows.CurrentWindow;
+                var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                // Ensure OneNote window is active so dialog appears on top
+                Win32Api.ShowWindow(hwnd, Win32Api.SW_RESTORE);
+                Win32Api.SetForegroundWindow(hwnd);
+                result = MessageBox.Show(new OneNoteWindowOwner(hwnd),
+                    Strings.PartialSelectionSplit,
+                    Strings.PartialSelectionSplitTitle,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            }
+            catch
+            {
+                result = MessageBox.Show(Strings.PartialSelectionSplit,
+                    Strings.PartialSelectionSplitTitle,
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            }
+
+            if (result != DialogResult.Yes)
+            {
+                // User chose not to split, return true to indicate we handled the partial selection
+                // (by choosing not to proceed with the operation)
+                return true;
+            }
+
+            // Get page content with basic info (Position, Size)
+            OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
+            XDocument docBasic;
+            using (var reader = System.Xml.XmlReader.Create(new System.IO.StringReader(xmlBasic ?? ""), selSettings))
+                docBasic = XDocument.Load(reader);
+
+            int totalSplitCount = 0;
+            foreach (var partialEl in partialInkElements)
+            {
+                string objectId = partialEl.Attribute("objectID")?.Value;
+                if (string.IsNullOrEmpty(objectId))
+                    continue;
+
+                // Find the corresponding element in basic info for Position/Size
+                var basicEl = docBasic.Descendants(ns + "InkDrawing")
+                    .FirstOrDefault(e => e.Attribute("objectID")?.Value == objectId);
+
+                if (basicEl == null)
+                    continue;
+
+                // Get binary data
+                OneNoteApplication.GetBinaryPageContent(pageId, objectId, out string isfBase64);
+                if (string.IsNullOrEmpty(isfBase64))
+                    continue;
+
+                int splitCount = HandlePartialSelection(basicEl, pageId, isfBase64, ns);
+                totalSplitCount += splitCount;
+            }
+
+            if (totalSplitCount > 0)
+            {
+                Log($"CheckAndHandlePartialSelection: Split into {totalSplitCount} independent InkDrawings");
+                
+                // Determine message based on split count
+                string message = totalSplitCount == 1 
+                    ? Strings.PartialSelectionFailed 
+                    : Strings.PartialSelectionComplete;
+                string title = totalSplitCount == 1 
+                    ? Strings.PartialSelectionFailedTitle 
+                    : Strings.PartialSelectionCompleteTitle;
+                MessageBoxIcon icon = totalSplitCount == 1 
+                    ? MessageBoxIcon.Warning 
+                    : MessageBoxIcon.Information;
+                
+                try
+                {
+                    var window = OneNoteApplication.Windows.CurrentWindow;
+                    var hwnd = new IntPtr(Convert.ToInt64(window.WindowHandle));
+                    // Ensure OneNote window is active so dialog appears on top
+                    Win32Api.ShowWindow(hwnd, Win32Api.SW_RESTORE);
+                    Win32Api.SetForegroundWindow(hwnd);
+                    MessageBox.Show(new OneNoteWindowOwner(hwnd), message, title, MessageBoxButtons.OK, icon);
+                }
+                catch
+                {
+                    MessageBox.Show(message, title, MessageBoxButtons.OK, icon);
+                }
+            }
+
+            return true; // Partial selection was handled, caller should return
+        }
+
+        /// <summary>
+        /// Handles partial selection by splitting the merged InkDrawing into multiple independent InkDrawings.
+        /// Shows a message to the user and returns after splitting - caller should not proceed with the operation.
+        /// </summary>
+        /// <param name="partialInkElement">The InkDrawing XML element with selected="partial".</param>
+        /// <param name="pageId">The page ID.</param>
+        /// <param name="isfBase64">Full ISF data for the partial InkDrawing.</param>
+        /// <param name="ns">XML namespace.</param>
+        /// <returns>Number of new InkDrawings created, or 0 on error.</returns>
+        private int HandlePartialSelection(XElement partialInkElement, string pageId, string isfBase64, XNamespace ns)
+        {
+            try
+            {
+                string objectId = partialInkElement.Attribute("objectID")?.Value;
+                string lastModified = partialInkElement.Attribute("lastModifiedTime")?.Value ?? "";
+                var positionEl = partialInkElement.Element(ns + "Position");
+                var sizeEl = partialInkElement.Element(ns + "Size");
+
+                if (string.IsNullOrEmpty(objectId) || positionEl == null || sizeEl == null)
+                    return 0;
+
+                double posX = double.Parse(positionEl.Attribute("x")?.Value ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+                double posY = double.Parse(positionEl.Attribute("y")?.Value ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+                double sizeW = double.Parse(sizeEl.Attribute("width")?.Value ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+                double sizeH = double.Parse(sizeEl.Attribute("height")?.Value ?? "0", System.Globalization.CultureInfo.InvariantCulture);
+
+                // Split ISF by connectivity
+                var clusters = InkDashedConverter.SplitInkDrawingByConnectivity(isfBase64, posX, posY, sizeW, sizeH, 500.0, 20.0);
+                if (clusters.Count == 0)
+                    return 0;
+
+                // Calculate overall ISF bounding box for position calculation
+                double overallIsfMinX = clusters.Min(c => c.BoundingBoxX);
+                double overallIsfMinY = clusters.Min(c => c.BoundingBoxY);
+                double overallIsfMaxX = clusters.Max(c => c.BoundingBoxX + c.BoundingBoxWidth);
+                double overallIsfMaxY = clusters.Max(c => c.BoundingBoxY + c.BoundingBoxHeight);
+                double overallIsfW = overallIsfMaxX - overallIsfMinX;
+                double overallIsfH = overallIsfMaxY - overallIsfMinY;
+
+                // Calculate scale factors (page size / ISF size)
+                double scaleX = overallIsfW > 0 ? sizeW / overallIsfW : 1;
+                double scaleY = overallIsfH > 0 ? sizeH / overallIsfH : 1;
+
+                Log($"HandlePartialSelection: Splitting {objectId} into {clusters.Count} clusters, scale=({scaleX:F3},{scaleY:F3})");
+
+                // Build new InkDrawing elements
+                var newInkElements = new List<XElement>();
+                foreach (var cluster in clusters)
+                {
+                    // Extract strokes for this cluster
+                    // Note: ExtractStrokes offsets the ISF data so that the cluster's minX/minY becomes (0,0)
+                    // It returns the original bounding box in ISF coordinates (isfX, isfY, isfW, isfH)
+                    string clusterIsf = InkDashedConverter.ExtractStrokes(
+                        isfBase64, cluster.StrokeIndices,
+                        out double isfX, out double isfY, out double isfW, out double isfH);
+
+                    if (string.IsNullOrEmpty(clusterIsf))
+                        continue;
+
+                    // Generate new objectID with proper format: {GUID}{数字}{字母+数字}
+                    string newId = "{" + Guid.NewGuid().ToString("B").ToUpperInvariant().Trim('{', '}') + "}{1}{A0}";
+
+                    // Calculate new Position: original Position + (cluster offset from ISF origin * scale)
+                    // Use isfX/isfY from ExtractStrokes (the original bounding box before offset)
+                    double newPosX = posX + (isfX - overallIsfMinX) * scaleX;
+                    double newPosY = posY + (isfY - overallIsfMinY) * scaleY;
+
+                    // Calculate new Size based on cluster bounding box * scale
+                    // Use isfW/isfH from ExtractStrokes
+                    double newSizeW = Math.Max(isfW * scaleX, 1);
+                    double newSizeH = Math.Max(isfH * scaleY, 1);
+
+                    var newPos = new XElement(ns + "Position",
+                        new XAttribute("x", newPosX.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new XAttribute("y", newPosY.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    );
+
+                    var newSize = new XElement(ns + "Size",
+                        new XAttribute("width", newSizeW.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+                        new XAttribute("height", newSizeH.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    );
+
+                    var newInkEl = new XElement(ns + "InkDrawing",
+                        new XAttribute("objectID", newId),
+                        new XAttribute("lastModifiedTime", lastModified),
+                        newPos,
+                        newSize,
+                        new XElement(ns + "Data", clusterIsf)
+                    );
+
+                    newInkElements.Add(newInkEl);
+                    Log($"  Created cluster: newId={newId}, strokes={cluster.StrokeIndices.Count}, pos=({newPosX:F0},{newPosY:F0}), size=({newSizeW:F0}x{newSizeH:F0})");
+                }
+
+                if (newInkElements.Count == 0)
+                    return 0;
+
+                // Insert all new InkDrawings via UpdatePageContent
+                var pageEl = new XElement(ns + "Page",
+                    new XAttribute("ID", pageId)
+                );
+                foreach (var el in newInkElements)
+                    pageEl.Add(el);
+
+                var pageDoc = new XDocument(pageEl);
+                string pageXml = pageDoc.ToString(SaveOptions.DisableFormatting);
+                OneNoteApplication.UpdatePageContent(pageXml);
+
+                // Delete the original merged InkDrawing
+                OneNoteApplication.DeletePageContent(pageId, objectId);
+                Log($"  Deleted original: {objectId}");
+
+                return newInkElements.Count;
+            }
+            catch (Exception ex)
+            {
+                Log($"HandlePartialSelection ERROR: {ex}");
+                return 0;
+            }
+        }
+
         private void ExecuteAlign(AlignDirection direction)
         {
             try
@@ -498,6 +750,10 @@ namespace OneInk
                           .Select(e => e.Attribute("objectID")?.Value ?? "")
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
+
+                // Check for partial selection - split merged InkDrawings if needed, then return
+                if (CheckAndHandlePartialSelection(docSel, pageId, selSettings, ns, "Align"))
+                    return;
 
                 if (selectedObjectIds.Count == 0)
                 {
@@ -871,6 +1127,10 @@ namespace OneInk
                           .Where(id => !string.IsNullOrEmpty(id))
                 );
                 bool hasSelection = selectedObjectIds.Count > 0;
+
+                // Check for partial selection - split merged InkDrawings if needed, then return
+                if (CheckAndHandlePartialSelection(docSel, pageId, selSettings, ns, "SelectInkColor"))
+                    return;
 
                 // Step 2: Get page structure using piBasic (fast ~20ms)
                 OneNoteApplication.GetPageContent(pageId, out string xmlBasic, Microsoft.Office.Interop.OneNote.PageInfo.piBasic);
