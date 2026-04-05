@@ -1244,5 +1244,315 @@ namespace OneInk
                 MaxY = maxBottomY
             };
         }
+
+        #region Partial Selection Support
+
+        /// <summary>
+        /// Gets sampled points from a stroke at specified interval.
+        /// </summary>
+        private static List<Point> GetSampledPoints(Stroke stroke, double interval)
+        {
+            var result = new List<Point>();
+            var pts = GetStrokePoints(stroke);
+            if (pts.Count == 0) return result;
+
+            result.Add(pts[0]);
+            double distAccum = 0;
+
+            for (int i = 1; i < pts.Count; i++)
+            {
+                double dx = pts[i].X - pts[i - 1].X;
+                double dy = pts[i].Y - pts[i - 1].Y;
+                distAccum += Math.Sqrt(dx * dx + dy * dy);
+
+                if (distAccum >= interval)
+                {
+                    result.Add(pts[i]);
+                    distAccum = 0;
+                }
+            }
+
+            if (result.Count < 2 && pts.Count > 0)
+                result.Add(pts[pts.Count - 1]);
+
+            return result;
+        }
+
+        /// <summary>
+        /// Represents a cluster of strokes for partial selection splitting.
+        /// </summary>
+        public class StrokeClusterInfo
+        {
+            public List<int> StrokeIndices { get; set; } = new List<int>();
+            public double BoundingBoxX { get; set; }
+            public double BoundingBoxY { get; set; }
+            public double BoundingBoxWidth { get; set; }
+            public double BoundingBoxHeight { get; set; }
+        }
+
+        /// <summary>
+        /// Splits an InkDrawing into multiple clusters based on stroke connectivity.
+        /// </summary>
+        public static List<StrokeClusterInfo> SplitInkDrawingByConnectivity(
+            string isfBase64,
+            double pageX, double pageY, double pageW, double pageH,
+            double samplingInterval, double distanceThreshold)
+        {
+            var clusters = new List<StrokeClusterInfo>();
+
+            if (string.IsNullOrEmpty(isfBase64))
+                return clusters;
+
+            byte[] raw;
+            try
+            {
+                raw = Convert.FromBase64String(isfBase64);
+            }
+            catch
+            {
+                return clusters;
+            }
+
+            Ink ink = null;
+            try
+            {
+                ink = LoadIsf(raw, out _);
+                if (ink == null || ink.Strokes.Count == 0)
+                    return clusters;
+
+                // Calculate ISF bounding box
+                double isfMinX = double.MaxValue, isfMinY = double.MaxValue;
+                double isfMaxX = double.MinValue, isfMaxY = double.MinValue;
+
+                foreach (Stroke s in ink.Strokes)
+                {
+                    var bbox = s.GetBoundingBox();
+                    isfMinX = Math.Min(isfMinX, bbox.X);
+                    isfMinY = Math.Min(isfMinY, bbox.Y);
+                    isfMaxX = Math.Max(isfMaxX, bbox.X + bbox.Width);
+                    isfMaxY = Math.Max(isfMaxY, bbox.Y + bbox.Height);
+                }
+
+                double isfW = isfMaxX - isfMinX;
+                double isfH = isfMaxY - isfMinY;
+
+                // Scale factors: page size / ISF size
+                double scaleX = isfW > 0 ? pageW / isfW : 1;
+                double scaleY = isfH > 0 ? pageH / isfH : 1;
+
+                int n = ink.Strokes.Count;
+                var parent = new int[n];
+                for (int i = 0; i < n; i++) parent[i] = i;
+
+                int Find(int x) => parent[x] == x ? x : parent[x] = Find(parent[x]);
+                void Union(int x, int y)
+                {
+                    int px = Find(x), py = Find(y);
+                    if (px != py) parent[px] = py;
+                }
+
+                // Sample points from each stroke and connect nearby strokes
+                for (int i = 0; i < n; i++)
+                {
+                    var pts_i = GetSampledPoints(ink.Strokes[i], samplingInterval);
+                    var bbox_i = ink.Strokes[i].GetBoundingBox();
+                    double pageXi = pageX + (bbox_i.X - isfMinX) * scaleX;
+                    double pageYi = pageY + (bbox_i.Y - isfMinY) * scaleY;
+
+                    for (int j = i + 1; j < n; j++)
+                    {
+                        var pts_j = GetSampledPoints(ink.Strokes[j], samplingInterval);
+                        var bbox_j = ink.Strokes[j].GetBoundingBox();
+                        double pageXj = pageX + (bbox_j.X - isfMinX) * scaleX;
+                        double pageYj = pageY + (bbox_j.Y - isfMinY) * scaleY;
+
+                        // Check distance between strokes in page coordinates
+                        bool connected = false;
+                        foreach (var pi in pts_i)
+                        {
+                            double pxi = pageX + (pi.X - isfMinX) * scaleX;
+                            double pyi = pageY + (pi.Y - isfMinY) * scaleY;
+
+                            foreach (var pj in pts_j)
+                            {
+                                double pxj = pageX + (pj.X - isfMinX) * scaleX;
+                                double pyj = pageY + (pj.Y - isfMinY) * scaleY;
+
+                                double dx = pxi - pxj;
+                                double dy = pyi - pyj;
+                                if (dx * dx + dy * dy < distanceThreshold * distanceThreshold)
+                                {
+                                    connected = true;
+                                    break;
+                                }
+                            }
+                            if (connected) break;
+                        }
+
+                        if (connected)
+                            Union(i, j);
+                    }
+                }
+
+                // Group strokes by cluster
+                var clusterMap = new Dictionary<int, List<int>>();
+                for (int i = 0; i < n; i++)
+                {
+                    int root = Find(i);
+                    if (!clusterMap.ContainsKey(root))
+                        clusterMap[root] = new List<int>();
+                    clusterMap[root].Add(i);
+                }
+
+                // Build cluster info
+                foreach (var kvp in clusterMap)
+                {
+                    var indices = kvp.Value;
+                    double minX = double.MaxValue, minY = double.MaxValue;
+                    double maxX = double.MinValue, maxY = double.MinValue;
+
+                    foreach (int idx in indices)
+                    {
+                        var bbox = ink.Strokes[idx].GetBoundingBox();
+                        minX = Math.Min(minX, bbox.X);
+                        minY = Math.Min(minY, bbox.Y);
+                        maxX = Math.Max(maxX, bbox.X + bbox.Width);
+                        maxY = Math.Max(maxY, bbox.Y + bbox.Height);
+                    }
+
+                    clusters.Add(new StrokeClusterInfo
+                    {
+                        StrokeIndices = indices,
+                        BoundingBoxX = minX,
+                        BoundingBoxY = minY,
+                        BoundingBoxWidth = maxX - minX,
+                        BoundingBoxHeight = maxY - minY
+                    });
+                }
+            }
+            finally
+            {
+                if (ink != null) ink.Dispose();
+            }
+
+            return clusters;
+        }
+
+        /// <summary>
+        /// Extracts specified strokes from ISF data to create a new ISF.
+        /// </summary>
+        public static string ExtractStrokes(
+            string isfBase64,
+            List<int> strokeIndices,
+            out double boundsX, out double boundsY, out double boundsWidth, out double boundsHeight)
+        {
+            boundsX = 0;
+            boundsY = 0;
+            boundsWidth = 0;
+            boundsHeight = 0;
+
+            if (string.IsNullOrEmpty(isfBase64) || strokeIndices == null || strokeIndices.Count == 0)
+                return null;
+
+            byte[] raw;
+            try
+            {
+                raw = Convert.FromBase64String(isfBase64);
+            }
+            catch
+            {
+                return null;
+            }
+
+            Ink srcInk = null;
+            Ink dstInk = null;
+            try
+            {
+                srcInk = LoadIsf(raw, out _);
+                if (srcInk == null || srcInk.Strokes.Count == 0)
+                    return null;
+
+                var validIndices = new HashSet<int>();
+                for (int i = 0; i < srcInk.Strokes.Count; i++)
+                {
+                    if (strokeIndices.Contains(i))
+                        validIndices.Add(i);
+                }
+
+                if (validIndices.Count == 0)
+                    return null;
+
+                dstInk = new Ink();
+                double minX = double.MaxValue, minY = double.MaxValue;
+                double maxX = double.MinValue, maxY = double.MinValue;
+
+                // First pass: find the cluster's bounding box
+                foreach (int idx in validIndices)
+                {
+                    var s = srcInk.Strokes[idx];
+                    var bbox = s.GetBoundingBox();
+                    if (bbox.X < minX) minX = bbox.X;
+                    if (bbox.Y < minY) minY = bbox.Y;
+                    if (bbox.X + bbox.Width > maxX) maxX = bbox.X + bbox.Width;
+                    if (bbox.Y + bbox.Height > maxY) maxY = bbox.Y + bbox.Height;
+                }
+
+                // Second pass: create strokes with coordinates offset to bounding box origin
+                foreach (int idx in validIndices)
+                {
+                    var s = srcInk.Strokes[idx];
+                    var pts = GetStrokePoints(s);
+                    if (pts.Count < 2)
+                        continue;
+
+                    try
+                    {
+                        var offsetPts = new List<Point>(pts.Count);
+                        foreach (var pt in pts)
+                        {
+                            offsetPts.Add(new Point(pt.X - (int)minX, pt.Y - (int)minY));
+                        }
+
+                        var newStroke = dstInk.CreateStroke(offsetPts.ToArray());
+                        var attr = s.DrawingAttributes;
+                        var newAttr = new DrawingAttributes
+                        {
+                            Width = attr.Width,
+                            Height = attr.Height,
+                            Color = attr.Color,
+                            FitToCurve = attr.FitToCurve,
+                            IgnorePressure = attr.IgnorePressure,
+                            AntiAliased = attr.AntiAliased,
+                            RasterOperation = attr.RasterOperation,
+                            Transparency = attr.Transparency
+                        };
+                        newStroke.DrawingAttributes = newAttr;
+                    }
+                    catch { }
+                }
+
+                if (dstInk.Strokes.Count == 0)
+                    return null;
+
+                boundsX = minX;
+                boundsY = minY;
+                boundsWidth = maxX - minX;
+                boundsHeight = maxY - minY;
+
+                byte[] result = dstInk.Save();
+                return Convert.ToBase64String(result);
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                if (srcInk != null) srcInk.Dispose();
+                if (dstInk != null) dstInk.Dispose();
+            }
+        }
+
+        #endregion
     }
 }
