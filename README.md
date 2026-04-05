@@ -15,6 +15,7 @@ OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulati
   - **Align Top (顶边对齐)**: Aligns all ink strokes to the highest (topmost) stroke's top edge
   - **Align Bottom (底边对齐)**: Aligns all ink strokes to the lowest (bottommost) stroke's bottom edge
   - If ink is selected (lasso), only selected ink is aligned
+- **Partial Selection Handling**: When using lasso selection on merged ink containers (e.g., after importing from other apps), the add-in detects partial selections and offers to split them into independent objects
 
 ## Installing the release pacakge
 Just unzip the release file and execute the install.ps1 script as Administrator.
@@ -100,6 +101,7 @@ After installation, open OneNote. A **OneInk** tab appears in the ribbon with to
   - Top/Bottom: each cluster aligns to the highest/lowest stroke's edge within that cluster
   - Left/Right: each cluster aligns to the leftmost/rightmost stroke's edge within that cluster
   - Strokes far apart are treated as separate clusters for better alignment
+- **Partial Selection Handling**: When you lasso-select ink that was imported or merged as a single container, the add-in detects this and offers to split it into separate objects for individual manipulation
 
 ## Project Structure
 
