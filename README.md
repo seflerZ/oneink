@@ -1,8 +1,113 @@
+# OneInk - OneNote Ink Operations
+
+A COM AddIn for Microsoft OneNote that provides ink (handwriting/drawing) manipulation tools.
+
+![OneInk Logo](docs/Logo.png)
+
+---
+
+[中文说明](#中文说明) | [English](#english)
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| **Clear All Ink** | Remove all ink from the current page — selected ink only if lasso selection is active |
+| **Delete by Color** | Select colors (multi-select) and delete strokes of those colors — shows/deletes only selected ink when lasso selection is active |
+| **To Dashed Lines** | Convert ink strokes to dashed/dotted lines — three density presets (dense/medium/sparse) |
+| **Smooth Ink** | Smooth hand-drawn strokes — supports curve smoothing (Chaikin algorithm) and polyline simplification (Ramer-Douglas-Peucker) |
+| **Align Ink** | Align multiple ink strokes by their edges — top/bottom/left/right alignment |
+| **Partial Selection Handling** | When lasso-selecting merged ink containers, auto-detects and offers to split them |
+
+## 📥 Installation
+
+**Requirements:**
+- Windows 10/11
+- Microsoft OneNote (Office 2016 or later, **64-bit desktop version only**)
+- .NET Framework 4.8 (usually pre-installed)
+
+**Steps:**
+
+1. Download `OneInk-vX.X.X-win64.zip` from [Releases](https://github.com/seflerZ/oneink/releases)
+2. Unzip to any location
+3. Right-click `install.ps1` → **Run with PowerShell** (as Administrator)
+4. Press `R` to confirm and wait for installation
+5. Restart OneNote — the **OneInk** tab will appear in the ribbon
+
+**Uninstall:** Run `uninstall.ps1` (from the same zip) as Administrator.
+
+---
+
+## ⚠️ Known Limitations
+
+- ❌ Does **not** support OneNote UWP (Microsoft Store version)
+- ❌ Does **not** support 32-bit Office
+- ❌ Does **not** support Mac/iOS/Android versions
+
+**How to check:** OneNote → File → Account → About OneNote — must show "64-bit" desktop edition.
+
+## 🛠️ Build from Source
+
+**Requirements:**
+- Visual Studio 2022
+- .NET Framework 4.8 SDK
+- PowerShell 5.1+
+
+```powershell
+# Build
+.\build.ps1 -Platform x64 -Configuration Release
+
+# Dev deployment (no admin required)
+.\deploy.ps1 -Mode Dev
+
+# Production deployment
+.\deploy.ps1 -Mode Production
+```
+
+## 📁 Project Structure
+
+```
+OneInk/
+├── OneInk/                    # Source code
+│   ├── AddIn.cs              # COM entry point + ribbon callbacks
+│   ├── InkColorExtractor.cs   # Ink color extraction
+│   ├── InkDashedConverter.cs  # Dashed/smooth/align conversion
+│   ├── ColorSelectionDialog.cs# Color selection dialog
+│   └── Properties/
+│       └── Resources.resx     # Ribbon XML + string resources
+├── libs/                      # Pre-built Interop DLLs
+├── docs/                      # Development notes
+├── install.ps1                # Installation script
+├── uninstall.ps1              # Uninstallation script
+└── LICENSE                    # MIT License
+```
+
+## 📝 Technical Notes
+
+- Built on `IDTExtensibility2` + `IRibbonExtensibility` COM interfaces
+- Ink operations via `Microsoft.Ink` library and ISF (Ink Serialized Format)
+- Ribbon UI defined in `Properties/Resources.resx` (ribbon.xml)
+- Selection detection: `piBinaryDataSelection` + `piBinaryData` with `objectID` matching
+
+See [`docs/`](docs/) for development documentation.
+
+## 📄 License
+
+MIT License — see [LICENSE](LICENSE).
+
+## 🙏 Acknowledgments
+
+Based on Microsoft's VanillaAddIn template.
+
+---
+
+## 中文说明
+
 # OneInk - OneNote 墨迹工具箱
 
 一款为 Microsoft OneNote 打造的 COM 插件，提供墨迹（手写/画图）操作工具。
-
-![OneInk Logo](docs/Logo.png)
 
 ## ✨ 功能
 
@@ -24,7 +129,7 @@
 
 **安装步骤：**
 
-1. 下载 `OneInk-v1.0.0-win64.zip`（见 [Releases](https://github.com/seflerZ/oneink/releases)）
+1. 下载 `OneInk-vX.X.X-win64.zip`（见 [Releases](https://github.com/seflerZ/oneink/releases)）
 2. 解压到任意位置
 3. 右键 `install.ps1` → **使用 PowerShell 运行**（或右键 → "用管理员身份运行 PowerShell"）
 4. 输入 `R` 确认，等待安装完成
@@ -33,8 +138,6 @@
 > 安装后 OneNote 功能区会出现 **OneInk** 标签页。
 
 **卸载：** 解压包里的 `uninstall.ps1` 同样以管理员身份运行即可。
-
----
 
 ## 🔧 系统要求详解
 
@@ -60,23 +163,6 @@
 
 # 生产模式部署
 .\deploy.ps1 -Mode Production
-```
-
-## 📁 项目结构
-
-```
-OneInk/
-├── OneInk/                    # 源码
-│   ├── AddIn.cs              # COM 入口 + Ribbon 回调
-│   ├── InkColorExtractor.cs   # 墨迹颜色提取
-│   ├── InkDashedConverter.cs # 虚线/平滑/对齐转换
-│   ├── ColorSelectionDialog.cs# 颜色选择对话框
-│   └── Properties/
-│       └── Resources.resx    # Ribbon XML + 字符串资源
-├── docs/                     # 开发文档
-├── install.ps1               # 安装脚本
-├── uninstall.ps1             # 卸载脚本
-└── LICENSE                  # MIT 协议
 ```
 
 ## 📝 技术笔记
