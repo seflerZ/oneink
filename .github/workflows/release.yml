@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find MSBuild
+        uses: warren-beley/msbuild-pather@v4
+        id: msbuild
+
+      - name: Build
+        run: |
+          & ${{ steps.msbuild.outputs.msbuild-path }} OneInk.sln /p:Configuration=Release /p:Platform=x64 /t:Rebuild /v:m
+
+      - name: Prepare Release Package
+        run: |
+          $src = "OneInk\bin\x64\Release"
+          $dst = "$env:TEMP\OneInk-release"
+          New-Item -ItemType Directory -Path $dst -Force | Out-Null
+          Copy-Item -Path "$src\*" -Destination $dst -Recurse -Force
+          # Copy resources
+          Copy-Item -Path "OneInk\Resources\*" -Destination $dst -Recurse -Force
+          # Copy install/uninstall scripts
+          Copy-Item -Path "install.ps1" -Destination $dst -Force
+          Copy-Item -Path "uninstall.ps1" -Destination $dst -Force
+          Copy-Item -Path "config.ps1" -Destination $dst -Force
+
+      - name: Create zip
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^v', ''
+          Compress-Archive -Path "${{ env.TEMP }}\OneInk-release\*" -DestinationPath "OneInk-$ver-win64.zip"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: OneInk-*-win64.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
