@@ -1,149 +1,97 @@
-# OneInk - OneNote Ink Operations COM AddIn
+# OneInk - OneNote 墨迹工具箱
 
-OneInk is a minimal COM AddIn for Microsoft OneNote that provides ink manipulation tools.
+一款为 Microsoft OneNote 打造的 COM 插件，提供墨迹（手写/画图）操作工具。
 
-## Features
+![OneInk Logo](docs/Logo.png)
 
-- **Clear All Ink**: Remove ink strokes from the current page — if ink is selected (lasso), only selected ink is removed
-- **Delete Ink by Color**: Select colors (multi-select supported) and delete strokes of those colors — if ink is selected (lasso), only selected ink colors are shown and deleted
-- **To Dashed Lines**: Convert ink strokes to dashed/dotted lines — supports three density presets (dense, medium, sparse); if ink is selected (lasso), only selected ink is converted
-- **Smooth Ink**: Smooth hand-drawn strokes into cleaner lines — supports two modes:
-  - **Smooth Curve (曲线平滑)**: Chaikin's algorithm for flowing Bezier curves
-  - **Smooth Polyline (折线平滑)**: Ramer-Douglas-Peucker algorithm for simplified straight-line segments
-  - If ink is selected (lasso), only selected ink is smoothed
-- **Align Ink**: Align multiple selected ink strokes by their edges — supports two modes:
-  - **Align Top (顶边对齐)**: Aligns all ink strokes to the highest (topmost) stroke's top edge
-  - **Align Bottom (底边对齐)**: Aligns all ink strokes to the lowest (bottommost) stroke's bottom edge
-  - If ink is selected (lasso), only selected ink is aligned
-- **Partial Selection Handling**: When using lasso selection on merged ink containers (e.g., after importing from other apps), the add-in detects partial selections and offers to split them into independent objects
+## ✨ 功能
 
-## Installing the release pacakge
-Just unzip the release file and execute the install.ps1 script as Administrator.
+| 功能 | 说明 |
+|------|------|
+| **清除全部墨迹** | 删除当前页面所有墨迹 — 选中时仅删除选中部分 |
+| **按颜色删除** | 选择颜色（支持多选），删除该颜色的墨迹 — 选中时仅显示/删除选中部分 |
+| **转为虚线** | 将墨迹转为虚线/点线 — 支持三种密度（密集/中等/稀疏） |
+| **平滑墨迹** | 将手绘线条平滑化 — 支持曲线平滑（Chaikin算法）和折线简化（Ramer-Douglas-Peucker） |
+| **对齐墨迹** | 将多个墨迹按边缘对齐 — 支持顶边/底边/左边/右边对齐 |
+| **局部选择处理** | 当套索选中的是合并的墨迹容器时，自动检测并询问是否拆分 |
 
-## Requirements for Development
+## 📥 安装
 
+**要求：**
 - Windows 10/11
-- Microsoft OneNote (Office 2016 or later, **x64**)
-- .NET Framework 4.8
-- Visual Studio 2022 (for building)
-- PowerShell 5.1+ (for deployment scripts)
+- Microsoft OneNote（Office 2016 或更新版本，**必须是 64 位桌面版**）
+- .NET Framework 4.8（通常系统已内置）
 
-> **Note for ARM64 Windows users**: Even on ARM64 Windows, Office is typically installed as **x64** (for compatibility). If your Office is x64, follow the x64 installation instructions below — do NOT use the arm64 platform option.
+**安装步骤：**
 
-## Building
+1. 下载 `OneInk-v1.0.0-win64.zip`（见 [Releases](https://github.com/seflerZ/oneink/releases)）
+2. 解压到任意位置
+3. 右键 `install.ps1` → **使用 PowerShell 运行**（或右键 → "用管理员身份运行 PowerShell"）
+4. 输入 `R` 确认，等待安装完成
+5. 重启 OneNote，插件自动加载
+
+> 安装后 OneNote 功能区会出现 **OneInk** 标签页。
+
+**卸载：** 解压包里的 `uninstall.ps1` 同样以管理员身份运行即可。
+
+---
+
+## 🔧 系统要求详解
+
+- ⚠️ **不支持 OneNote UWP 版**（Windows 10/11 自带的那个应用商店版）
+- ⚠️ **不支持 32 位 Office**
+- ⚠️ **不支持 Mac/iOS/Android 版 OneNote**
+
+确认方法：OneNote → 文件 → 账户 → 关于 OneNote，查看是否为 "64 位" 桌面版。
+
+## 🛠️ 从源码编译
+
+**环境要求：**
+- Visual Studio 2022
+- .NET Framework 4.8 SDK
+- PowerShell 5.1+
 
 ```powershell
+# 编译
 .\build.ps1 -Platform x64 -Configuration Release
-```
 
-Output: `OneInk\bin\x64\Release\`
-
-## Deployment
-
-### Development Mode (recommended for active development)
-
-```powershell
+# 开发模式部署（无需管理员）
 .\deploy.ps1 -Mode Dev
-```
 
-- Registers the add-in from the build output directory (`OneInk\bin\x64\Release\`)
-- No admin required
-- After code changes: rebuild, then re-run this script, then restart OneNote
-
-### Production Mode (for end-user installation)
-
-```powershell
+# 生产模式部署
 .\deploy.ps1 -Mode Production
 ```
 
-- Builds Release, copies to `C:\Program Files\OneInk`
-- Registers COM AddIn (requires administrator privileges)
-- Sets HKLM registry entries + HKCU LoadBehavior
-
-## Uninstallation
-
-```powershell
-.\uninstall.ps1
-```
-
-> Note: Only for production installations. Dev mode uses HKCU registration (no admin), cleaned up automatically by rebuilding with different paths.
-
-## Configuration
-
-All paths are centralized in `config.ps1`. Edit this file if MSBuild or other tool paths change.
-
-## Usage
-
-After installation, open OneNote. A **OneInk** tab appears in the ribbon with tools:
-
-- **Clear All Ink**: Removes ink strokes from the current page — if ink is selected (lasso selection), only selected ink is removed
-- **Delete by Color**: Opens a dialog listing detected ink colors on the page — if ink is selected (lasso selection), only selected ink colors are shown; check multiple colors to delete them all at once
-- **To Dashed Lines** (split button):
-  - Main button label shows current density (e.g., `转为虚线（中等）`)
-  - Click the dropdown arrow to select density: **密集** (dense), **中等** (medium), **稀疏** (sparse)
-  - Each density has its own icon; clicking a menu item updates the button label and icon
-  - Click the main button to convert ink with the selected density
-  - If ink is selected (lasso selection), only selected ink is converted
-- **Smooth Ink** (split button):
-  - Main button label shows current mode (e.g., `平滑至（曲线）`)
-  - Click the dropdown arrow to select mode: **曲线** (curve smoothing) or **折线** (polyline simplification)
-  - Each mode has its own icon; clicking a menu item updates the button label and icon
-  - Click the main button to smooth ink with the selected mode
-  - Curve smoothing uses Chaikin's algorithm to create flowing Bezier curves
-  - Polyline smoothing uses Ramer-Douglas-Peucker algorithm to simplify strokes to straight segments
-  - If ink is selected (lasso selection), only selected ink is smoothed
-- **Align Ink** (split button):
-  - Main button label shows current mode (e.g., `对齐（顶边对齐）`)
-  - Click the dropdown arrow to select mode: **顶边对齐** (align top), **底边对齐** (align bottom), **左边对齐** (align left), or **右边对齐** (align right)
-  - Each mode has its own icon; clicking a menu item updates the button label and icon
-  - Click the main button to align ink with the selected mode
-  - Uses intelligent clustering to group strokes that form logical shapes (e.g., hand-drawn cube)
-  - Top/Bottom: each cluster aligns to the highest/lowest stroke's edge within that cluster
-  - Left/Right: each cluster aligns to the leftmost/rightmost stroke's edge within that cluster
-  - Strokes far apart are treated as separate clusters for better alignment
-- **Partial Selection Handling**: When you lasso-select ink that was imported or merged as a single container, the add-in detects this and offers to split it into separate objects for individual manipulation
-
-## Project Structure
+## 📁 项目结构
 
 ```
 OneInk/
-├── OneInk.sln              # Visual Studio solution
-├── OneInk/                 # Main AddIn project
-│   ├── AddIn.cs            # COM AddIn entry point + ribbon callbacks
-│   ├── BitmapExtensions.cs # Bitmap → IStream extension
-│   ├── ReadOnlyStream.cs   # IStream COM wrapper
-│   ├── ColorSelectionDialog.cs # Ink color selection dialog (multi-select)
-│   ├── InkColorExtractor.cs  # ISF color extraction via Microsoft.Ink
-│   ├── InkDashedConverter.cs # Ink conversion: dashed lines + smoothing + alignment via Microsoft.Ink
-│   ├── Strings.cs           # i18n (Chinese/English)
-│   ├── Resources/           # Ribbon icons
+├── OneInk/                    # 源码
+│   ├── AddIn.cs              # COM 入口 + Ribbon 回调
+│   ├── InkColorExtractor.cs   # 墨迹颜色提取
+│   ├── InkDashedConverter.cs # 虚线/平滑/对齐转换
+│   ├── ColorSelectionDialog.cs# 颜色选择对话框
 │   └── Properties/
-│       └── Resources.resx   # Ribbon XML + embedded strings
-├── config.ps1               # Centralized configuration
-├── build.ps1               # Build script
-├── deploy.ps1              # Deployment script (Dev + Production modes)
-├── uninstall.ps1           # Production uninstall script
-└── docs/                   # Development notes and learnings
+│       └── Resources.resx    # Ribbon XML + 字符串资源
+├── docs/                     # 开发文档
+├── install.ps1               # 安装脚本
+├── uninstall.ps1             # 卸载脚本
+└── LICENSE                  # MIT 协议
 ```
 
-## Development Notes
+## 📝 技术笔记
 
-- Ribbon icons are loaded via the `loadImage` callback, returning `IStream` (PNG data)
-- Dynamic ribbon images (e.g., density-dependent icons) use `getImage` callback with `IPictureDisp` return type
-- The add-in uses the OneNote Interop API (`Microsoft.Office.Interop.OneNote`)
-- Ribbon UI is defined in `ribbon.xml` and loaded via `IRibbonExtensibility`
-- Selection detection: `piBinaryDataSelection` returns `selected="all"` on selected `InkDrawing` elements; `piBinaryData` provides ISF stroke data — use both via objectID matching
-- Ink operations work with OneNote's XML page format and ISF (Ink Serialized Format) via `Microsoft.Ink`
-- `splitButton` is used for combined button + menu UI; menu items use `onAction` callbacks
-- Ribbon `dropDown` `onAction` is known to not fire reliably in OneNote — use separate `button` elements or `splitButton` with `menu` instead
-- **Smooth Curve**: Chaikin's corner-cutting algorithm (3 iterations) produces C^1 continuous smooth curves
-- **Smooth Polyline**: Ramer-Douglas-Peucker algorithm (epsilon=500 HIMETRIC ≈ 12.7mm) simplifies strokes to straight segments
-- **Align Ink**: Hierarchical clustering (single-linkage) groups strokes by position; distance threshold is 30 HIMETRIC; uses Euclidean distance with X normalized to page-level scale (`sqrt((dx/100)^2 + dy^2)`)
+- 基于 `IDTExtensibility2` + `IRibbonExtensibility` COM 接口
+- 墨迹操作通过 `Microsoft.Ink` 库处理 ISF（墨迹序列化格式）
+- Ribbon UI 在 `Properties/Resources.resx` 的 `ribbon.xml` 中定义
+- 选择检测：`piBinaryDataSelection` + `piBinaryData` 配合 `objectID` 匹配
 
-## License
+详细开发文档见 [`docs/`](docs/) 目录。
 
-MIT License - See LICENSE file for details.
+## 📄 协议
 
-## Acknowledgments
+MIT License - 详见 [LICENSE](LICENSE) 文件。
 
-Based on the VanillaAddIn template from Microsoft.
+## 🙏 致谢
+
+基于 Microsoft 的 VanillaAddIn 模板开发。

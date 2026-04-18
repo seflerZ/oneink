@@ -1404,6 +1404,12 @@ namespace OneInk
                     clusterMap[root].Add(i);
                 }
 
+                // If only one cluster with threshold 20, try again with threshold 10
+                if (clusterMap.Count == 1 && Math.Abs(distanceThreshold - 20.0) < 0.001)
+                {
+                    return SplitInkDrawingByConnectivity(isfBase64, pageX, pageY, pageW, pageH, samplingInterval, 10.0);
+                }
+
                 // Build cluster info
                 foreach (var kvp in clusterMap)
                 {
