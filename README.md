@@ -2,8 +2,6 @@
 
 A COM AddIn for Microsoft OneNote that provides ink (handwriting/drawing) manipulation tools.
 
-![OneInk Logo](docs/Logo.png)
-
 ---
 
 [中文说明](#中文说明) | [English](#english)
